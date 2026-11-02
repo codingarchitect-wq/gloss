@@ -17,6 +17,14 @@ export type Block = {
   runs: Run[];
   src?: string;
   alt?: string;
+  /** A figure's dark-theme copy, shown on the reader's dark paper. */
+  srcDark?: string;
+  /** Where a figure leads (a YouTube video, from its thumbnail). */
+  href?: string;
+  /** A figure that is a video: its file, played in the reader. `src` is then its poster, if any. */
+  video?: string;
+  loop?: boolean;
+  muted?: boolean;
   rows?: string[][];
   head?: boolean;
   /** The PDF page it came from, so one page can be read again and swapped in alone. */

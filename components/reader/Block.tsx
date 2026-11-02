@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, type ReactNode } from "react";
-import { MessageCirclePlus } from "lucide-react";
+import { MessageCirclePlus, Play } from "lucide-react";
 import type { Block as BlockT, Run } from "@/lib/article";
 
 /** `note`: a highlight with the reader's note, set only in the block where it ends. */
@@ -120,7 +120,7 @@ function repairSrc(src: string): string {
   }
 }
 
-function Picture({ src, alt }: { src: string; alt?: string }) {
+function Picture({ src, alt, className = "" }: { src: string; alt?: string; className?: string }) {
   const [state, setState] = useState<"loading" | "ok" | "gone">("loading");
   if (state === "gone") return null;
   return (
@@ -131,10 +131,37 @@ function Picture({ src, alt }: { src: string; alt?: string }) {
       decoding="async"
       referrerPolicy="no-referrer"
       draggable={false}
-      className={`fig-img${state === "ok" ? " is-loaded" : ""}`}
+      className={`fig-img${className ? ` ${className}` : ""}${state === "ok" ? " is-loaded" : ""}`}
       onLoad={(e) => (e.currentTarget.naturalWidth < 48 ? setState("gone") : setState("ok"))}
       onError={() => setState("gone")}
     />
+  );
+}
+
+/**
+ * A figure's picture or video. A picture with a dark-theme copy carries both, and the theme's CSS shows
+ * one; the other, never displayed, is never fetched. A video plays here; a linked thumbnail (YouTube)
+ * opens the video where it lives.
+ */
+function Figure({ block }: { block: BlockT }) {
+  if (block.video) {
+    return <video className="fig-video" src={block.video} poster={block.src} controls playsInline preload="metadata" loop={block.loop} muted={block.muted} />;
+  }
+  if (!block.src) return null;
+  const pictures = (
+    <>
+      <Picture src={block.src} alt={block.alt} className={block.srcDark ? "has-dark" : ""} />
+      {block.srcDark && <Picture src={block.srcDark} alt={block.alt} className="fig-dark" />}
+    </>
+  );
+  if (!block.href || !/^https?:\/\//i.test(block.href)) return pictures;
+  return (
+    <a className="fig-link" href={block.href} target="_blank" rel="noopener noreferrer" aria-label={block.alt ? `Watch: ${block.alt}` : "Watch the video"}>
+      {pictures}
+      <span className="fig-play" aria-hidden>
+        <Play size={22} fill="currentColor" />
+      </span>
+    </a>
   );
 }
 
@@ -194,7 +221,7 @@ function BlockImpl({ block, n, first, marks, activeGloss, hoverGloss, activeHigh
           {n}
         </button>
       )}
-      {block.type === "figure" && block.src && <Picture src={block.src} alt={block.alt} />}
+      {block.type === "figure" && <Figure block={block} />}
       {block.type === "table" && block.rows ? (
         <Table rows={block.rows} head={block.head} />
       ) : block.type === "figure" ? (

@@ -73,19 +73,27 @@ export function prepareImages(doc: Document, base: string) {
   // <picture>: the <img> gets the best <source> when it has nothing of its own, then stands alone.
   for (const pic of Array.from(doc.querySelectorAll("picture"))) {
     const sources = Array.from(pic.querySelectorAll("source")).filter((s) => !/avif|jxl/i.test(s.getAttribute("type") ?? ""));
-    // A source without a media query is the general one; otherwise the widest.
-    const general = sources.find((s) => !s.getAttribute("media")) ?? sources[sources.length - 1];
+    const forDark = (s: Element) => /prefers-color-scheme:\s*dark/i.test(s.getAttribute("media") ?? "");
+    // A source without a media query is the general one; otherwise the widest that isn't for dark mode.
+    const general = sources.find((s) => !s.getAttribute("media")) ?? sources.filter((s) => !forDark(s)).pop() ?? sources[sources.length - 1];
     const fromSource = general ? largest(attrOf(general, "srcset")) : null;
+    const darkSource = sources.find(forDark);
+    const dark = darkSource ? largest(attrOf(darkSource, "srcset")) : null;
     let img = pic.querySelector("img");
     if (!img && fromSource) img = doc.createElement("img");
     if (!img) continue;
     if (!realSrc(img) && fromSource) img.setAttribute("src", fromSource);
+    if (dark && dark !== fromSource) img.setAttribute("data-src-dark", dark);
+    // The picture's own classes (Tailwind's dark:hidden) say which theme it is for.
+    const themed = (pic.getAttribute("class") ?? "").split(/\s+/).filter((t) => /(^|:)(dark|light)(:|$)|dark|light/.test(t));
+    if (themed.length) img.setAttribute("class", [img.getAttribute("class") ?? "", ...themed].join(" ").trim());
     pic.replaceWith(img);
   }
 
   // Placeholders and non-pictures go first: one left beside a real picture (Cloudflare's blurred
   // stand-in) would stop the climb to that picture's own wrapper below.
   const pictures: { img: Element; src: string }[] = [];
+  const darks: { img: Element; src: string }[] = [];
   for (const img of Array.from(doc.querySelectorAll("img"))) {
     const raw = realSrc(img);
     if (!raw) {
@@ -100,11 +108,18 @@ export function prepareImages(doc: Document, base: string) {
       continue;
     }
     if (!/^https?:/i.test(src)) continue;
-    if (NOT_A_PICTURE.test(src) || darkOnly(img, src)) {
+    if (NOT_A_PICTURE.test(src)) {
       img.remove();
       continue;
     }
-    pictures.push({ img, src });
+    if (darkOnly(img, src)) darks.push({ img, src });
+    else pictures.push({ img, src });
+  }
+  // A dark-theme copy goes with its light twin, which shows it on the reader's dark paper. The reader shows each once.
+  for (const d of darks) {
+    const twin = lightTwin(d.img, d.src, pictures);
+    if (twin && !twin.img.getAttribute("data-src-dark")) twin.img.setAttribute("data-src-dark", d.src);
+    d.img.remove();
   }
 
   const figures: Element[] = [];
@@ -133,6 +148,12 @@ export function prepareImages(doc: Document, base: string) {
     const clean = doc.createElement("img");
     clean.setAttribute("src", src);
     if (img.getAttribute("alt")) clean.setAttribute("alt", img.getAttribute("alt")!);
+    const dark = img.getAttribute("data-src-dark");
+    if (dark) {
+      try {
+        clean.setAttribute("data-src-dark", new URL(dark, base).toString());
+      } catch {}
+    }
     fig.appendChild(clean);
     if (caption && caption.length <= 300 && caption !== img.getAttribute("alt")) {
       const fc = doc.createElement("figcaption");
@@ -143,38 +164,179 @@ export function prepareImages(doc: Document, base: string) {
     figures.push(fig);
   }
 
+  // Videos: a <video> keeps its file and poster, and plays in the reader. A YouTube embed becomes its
+  // thumbnail, linked to the video, so no player from elsewhere runs inside the reader.
+  for (const video of Array.from(doc.querySelectorAll("video"))) {
+    const fig = videoFigure(video, doc, base);
+    if (fig) figures.push(fig);
+  }
+  for (const frame of Array.from(doc.querySelectorAll("iframe"))) {
+    const fig = youtubeFigure(frame, doc);
+    if (fig) figures.push(fig);
+  }
+
   // A gallery or carousel holds its figures in wrappers with no text of their own, and Readability
-  // drops any block with more pictures than paragraphs (OpenAI, claude.dev). The figures join the flow.
-  for (const fig of figures) {
-    for (let p = fig.parentElement; p && !STOP.test(p.tagName.toUpperCase()) && onlyFigures(p); ) {
-      const up = p.parentElement;
-      p.replaceWith(...Array.from(p.childNodes));
-      p = up;
+  // drops any block with more pictures than paragraphs (OpenAI, claude.dev). The figures join the flow,
+  // and so do the figures of a <figure> that is only a gallery of them (maevyn.codes), its caption
+  // going with the last. Repeated, since one gallery's wrappers empty out as its pictures are freed.
+  for (let pass = 0, changed = true; changed && pass < 6; pass++) {
+    changed = false;
+    for (const fig of figures) {
+      for (let p = fig.parentElement; p; ) {
+        const gallery = p.tagName.toUpperCase() === "FIGURE" && holdsFigures(p, true);
+        if (!gallery && (STOP.test(p.tagName.toUpperCase()) || !holdsFigures(p, false))) break;
+        const up = p.parentElement;
+        if (gallery) captionToLast(p, doc);
+        p.replaceWith(...Array.from(p.childNodes));
+        changed = true;
+        p = up;
+      }
     }
   }
+}
+
+/** What a gallery may hold beside its figures without being more than a gallery. */
+const NOT_DECORATION = /^(P|H[1-6]|UL|OL|DL|TABLE|BLOCKQUOTE|PRE|IMG|PICTURE|VIDEO|IFRAME|FORM)$/;
+const NOT_DECORATION_INSIDE = "p, h1, h2, h3, h4, h5, h6, ul, ol, dl, table, blockquote, pre, img, picture, video, iframe, form";
+
+/**
+ * An element holding figures and little else: no paragraphs, lists or other pictures, at most a few
+ * words of labels or arrows between them (maevyn.codes). `gallery`: a <figure> of figures, which may
+ * also carry a caption for them all. Unwrapping one only removes the wrapper; nothing in it is lost.
+ */
+function holdsFigures(el: Element, gallery: boolean): boolean {
+  let figs = 0;
+  let loose = 0;
+  for (const c of Array.from(el.childNodes)) {
+    if (c.nodeType === 3) {
+      loose += (c.textContent ?? "").trim().length;
+      continue;
+    }
+    if (c.nodeType !== 1) continue;
+    const e = c as Element;
+    const tag = e.tagName.toUpperCase();
+    if (tag === "FIGURE") figs++;
+    else if (gallery && tag === "FIGCAPTION") continue;
+    else if (NOT_DECORATION.test(tag) || e.querySelector(NOT_DECORATION_INSIDE)) return false;
+    else loose += (e.textContent ?? "").trim().length;
+  }
+  return figs > 0 && loose <= 80;
+}
+
+/** A gallery's caption goes to its last picture, or after it when that has its own. */
+function captionToLast(gallery: Element, doc: Document) {
+  const cap = Array.from(gallery.children).find((c) => c.tagName.toUpperCase() === "FIGCAPTION");
+  if (!cap) return;
+  const figs = Array.from(gallery.children).filter((c) => c.tagName.toUpperCase() === "FIGURE");
+  const last = figs[figs.length - 1];
+  if (last && !last.querySelector("figcaption")) last.appendChild(cap);
+  else {
+    const p = doc.createElement("p");
+    p.textContent = (cap.textContent ?? "").trim();
+    cap.replaceWith(p);
+  }
+}
+
+/** The light copy of a dark-theme picture: the same file name but for "dark", else the one other picture beside it. */
+function lightTwin(dark: Element, src: string, pictures: { img: Element; src: string }[]) {
+  const stem = themeStem(src);
+  const byName = stem ? pictures.find((p) => themeStem(p.src) === stem) : undefined;
+  if (byName) return byName;
+  for (let a = dark.parentElement, k = 0; a && k < 3; a = a.parentElement, k++) {
+    const near = pictures.filter((p) => a!.contains(p.img));
+    if (near.length === 1) return near[0];
+    if (near.length > 1) return undefined;
+  }
+  return undefined;
+}
+
+/** A file name with its "dark" or "light" marker taken out, or null when it has none. */
+function themeStem(src: string): string | null {
+  const s = src.split(/[?#]/)[0].replace(/([-_.])(dark|light)(?=[-_.])/i, "$1~");
+  return s.includes("~") ? s : null;
+}
+
+const VIDEO_TYPE = /^video\/(mp4|webm|ogg|quicktime)\b/i;
+
+/** A video from the article as a clean figure: its file (an MP4 first), its poster and its caption. */
+function videoFigure(video: Element, doc: Document, base: string): Element | null {
+  if (video.closest(CHROME) || hasJunkAncestor(video)) return null;
+  const home = video.closest("figure");
+  // A muted loop playing behind a header, with no controls and no caption, is decoration.
+  if (!home && !video.hasAttribute("controls") && video.hasAttribute("autoplay")) return null;
+  const resolve = (v: string | null) => {
+    if (!v || v.startsWith("blob:") || v.startsWith("data:")) return null;
+    try {
+      const u = new URL(v, base);
+      return /^https?:$/.test(u.protocol) ? u.toString() : null;
+    } catch {
+      return null;
+    }
+  };
+  const candidates = [
+    ...Array.from(video.querySelectorAll("source"))
+      .filter((s) => !s.getAttribute("type") || VIDEO_TYPE.test(s.getAttribute("type")!))
+      .sort((a, b) => Number(/mp4/i.test(b.getAttribute("type") ?? b.getAttribute("src") ?? "")) - Number(/mp4/i.test(a.getAttribute("type") ?? a.getAttribute("src") ?? "")))
+      .map((s) => s.getAttribute("src")),
+    video.getAttribute("src"),
+    video.getAttribute("data-src"),
+  ];
+  const src = candidates.map(resolve).find(Boolean);
+  if (!src) return null;
+  const fig = doc.createElement("figure");
+  const v = doc.createElement("video");
+  v.setAttribute("src", src);
+  const poster = resolve(video.getAttribute("poster"));
+  if (poster) v.setAttribute("poster", poster);
+  if (video.hasAttribute("loop")) v.setAttribute("loop", "");
+  if (video.hasAttribute("muted") || video.hasAttribute("autoplay")) v.setAttribute("muted", "");
+  fig.appendChild(v);
+  const caption = home?.querySelector("figcaption")?.textContent?.replace(/\s+/g, " ").trim();
+  if (caption && caption.length <= 600) {
+    const fc = doc.createElement("figcaption");
+    fc.textContent = caption;
+    fig.appendChild(fc);
+  }
+  (home && home.querySelectorAll("video, img, iframe").length === 1 ? home : video).replaceWith(fig);
+  return fig;
+}
+
+const YOUTUBE = /^(?:https?:)?\/\/(?:www\.)?(?:youtube(?:-nocookie)?\.com\/embed\/|youtu\.be\/)([\w-]{11})/i;
+
+/** A YouTube embed as its thumbnail, linked to the video. */
+function youtubeFigure(frame: Element, doc: Document): Element | null {
+  const id = YOUTUBE.exec(frame.getAttribute("src") ?? frame.getAttribute("data-src") ?? "")?.[1];
+  if (!id || frame.closest(CHROME) || hasJunkAncestor(frame)) return null;
+  const home = frame.closest("figure");
+  const title = (frame.getAttribute("title") ?? "").replace(/\s+/g, " ").trim();
+  const fig = doc.createElement("figure");
+  const img = doc.createElement("img");
+  img.setAttribute("src", `https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
+  img.setAttribute("width", "480");
+  img.setAttribute("height", "360");
+  img.setAttribute("alt", title || "A YouTube video");
+  img.setAttribute("data-href", `https://www.youtube.com/watch?v=${id}`);
+  fig.appendChild(img);
+  const caption = (home?.querySelector("figcaption")?.textContent ?? (title && !/^youtube( video player)?$/i.test(title) ? title : "")).replace(/\s+/g, " ").trim();
+  if (caption && caption.length <= 600) {
+    const fc = doc.createElement("figcaption");
+    fc.textContent = caption;
+    fig.appendChild(fc);
+  }
+  (home && home.querySelectorAll("video, img, iframe").length === 1 ? home : frame).replaceWith(fig);
+  return fig;
 }
 
 /** Where a picture's own wrapper ends and the article's structure begins. */
 const STOP = /^(BODY|ARTICLE|MAIN|SECTION|P|LI|TD|TH|BLOCKQUOTE|FIGURE)$/;
 
-/** An element holding figures and nothing else: no text, no other elements. */
-function onlyFigures(el: Element): boolean {
-  let n = 0;
-  for (const c of Array.from(el.childNodes)) {
-    if (c.nodeType === 1) {
-      if ((c as Element).tagName.toUpperCase() !== "FIGURE") return false;
-      n++;
-    } else if (c.nodeType === 3 && (c.textContent ?? "").trim()) return false;
-  }
-  return n > 0;
-}
 
 /** Named classes for the dark-theme copy of a picture: "theme-image-dark", "dark-only", "only-dark". */
 const DARK_CLASS = /^((theme-)?(image|img)-dark|dark-(only|mode-only|image|img)|(only|show)-dark)$/i;
 
 /**
  * The dark-theme copy of a picture that also comes in light (Gimlet, Tailwind's
- * "hidden dark:block", GitHub's "#gh-dark-mode-only"). The reader shows each once.
+ * "hidden dark:block" and "not-dark:hidden", GitHub's "#gh-dark-mode-only").
  */
 function darkOnly(img: Element, src: string): boolean {
   if (/#gh-dark-mode-only$/.test(src)) return true;
@@ -182,6 +344,7 @@ function darkOnly(img: Element, src: string): boolean {
     const tokens = (el?.getAttribute("class") ?? "").split(/\s+/);
     if (tokens.some((t) => DARK_CLASS.test(t))) return true;
     if (tokens.includes("hidden") && tokens.some((t) => /^dark:(block|inline|inline-block|flex|grid)$/.test(t))) return true;
+    if (tokens.some((t) => /^(not-dark|light):(hidden|invisible)$/.test(t))) return true;
   }
   return false;
 }

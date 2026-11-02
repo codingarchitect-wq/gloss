@@ -1830,6 +1830,57 @@ a.desk-tile:focus-visible {
   filter: brightness(0.9);
 }
 
+/* A picture that comes in two: the light copy on light paper, the dark copy on dark. */
+.prose-read .fig-img.fig-dark,
+[data-theme="night"] .prose-read .fig-img.has-dark,
+[data-theme="ink"] .prose-read .fig-img.has-dark {
+  display: none;
+}
+
+[data-theme="night"] .prose-read .fig-img.fig-dark,
+[data-theme="ink"] .prose-read .fig-img.fig-dark {
+  display: block;
+}
+
+.prose-read .fig-video {
+  display: block;
+  width: 100%;
+  max-height: 72vh;
+  margin: 0 auto;
+  border-radius: 6px;
+  background: #000;
+}
+
+/* A thumbnail that opens a video where it lives. */
+.prose-read .fig-link {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 6px;
+}
+
+.prose-read .fig-play {
+  position: absolute;
+  inset: 0;
+  width: 64px;
+  height: 64px;
+  margin: auto;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  pointer-events: none;
+  transition: transform 0.2s var(--ease-out), background 0.2s;
+}
+
+.prose-read .fig-link:hover .fig-play {
+  transform: scale(1.06);
+  background: rgb(0 0 0 / 0.75);
+}
+
 .prose-read .blk[data-type="figure"] .blk-text {
   margin-top: 0.75em;
   font-family: var(--font-sans);

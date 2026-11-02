@@ -75,15 +75,27 @@ export function parseSrcset(s: string): { url: string; size: number }[] {
   return out;
 }
 
+/** An http(s) address, resolved, or undefined. */
+function httpUrl(raw: string | null, base?: string): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw, base);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** An image worth showing: a real http(s) picture or a kept inline diagram, not a spacer, tracking pixel or other inline blob. */
-function imageOf(img: El, base?: string): { src: string; alt?: string } | null {
+function imageOf(img: El, base?: string): { src: string; alt?: string; srcDark?: string; href?: string } | null {
   const attr = (n: string) => img.getAttribute?.(n) ?? null;
+  const extras = { srcDark: httpUrl(attr("data-src-dark"), base), href: httpUrl(attr("data-href"), base) };
   const srcset = attr("srcset") ?? attr("data-srcset");
   // The largest candidate in a srcset reads best on a sharp screen.
   const fromSet = srcset ? parseSrcset(srcset).sort((a, b) => b.size - a.size)[0]?.url : undefined;
   const src0 = attr("src");
   // A diagram drawn inline on the page, made a standalone picture by lib/svg-figures.ts.
-  if (src0?.startsWith("data:image/svg+xml;base64,")) return { src: src0, alt: clean(attr("alt")) || undefined };
+  if (src0?.startsWith("data:image/svg+xml;base64,")) return { src: src0, alt: clean(attr("alt")) || undefined, ...extras };
   const raw = fromSet ?? (src0 && !src0.startsWith("data:") ? src0 : attr("data-src"));
   if (!raw) return null;
   let src: string;
@@ -97,7 +109,14 @@ function imageOf(img: El, base?: string): { src: string; alt?: string } | null {
   const h = Number(attr("height"));
   if ((w && w < 48) || (h && h < 48)) return null;
   const alt = clean(attr("alt"));
-  return { src, alt: alt || undefined };
+  return { src, alt: alt || undefined, ...extras };
+}
+
+/** A video kept by prepareImages: its file, poster and how it plays. */
+function videoOf(video: El, base?: string): { video: string; poster?: string; loop: boolean; muted: boolean } | null {
+  const src = httpUrl(video.getAttribute?.("src") ?? null, base);
+  if (!src) return null;
+  return { video: src, poster: httpUrl(video.getAttribute?.("poster") ?? null, base), loop: video.getAttribute?.("loop") != null, muted: video.getAttribute?.("muted") != null };
 }
 
 /** Rows of cell text, or null when the table is really layout. */
@@ -205,7 +224,21 @@ export function htmlToBlocks(root: El, base?: string): Block[] {
     const im = imageOf(img, base);
     if (!im || seen.has(sameImage(im.src))) return;
     seen.add(sameImage(im.src));
-    blocks.push({ id: `b${++i}`, type: "figure", runs: caption, src: im.src, ...(im.alt ? { alt: im.alt } : {}) });
+    blocks.push({
+      id: `b${++i}`,
+      type: "figure",
+      runs: caption,
+      src: im.src,
+      ...(im.alt ? { alt: im.alt } : {}),
+      ...(im.srcDark ? { srcDark: im.srcDark } : {}),
+      ...(im.href ? { href: im.href } : {}),
+    });
+  };
+  const movie = (el: El, caption: Run[] = []) => {
+    const v = videoOf(el, base);
+    if (!v || seen.has(v.video)) return;
+    seen.add(v.video);
+    blocks.push({ id: `b${++i}`, type: "figure", runs: caption, video: v.video, ...(v.poster ? { src: v.poster } : {}), ...(v.loop ? { loop: true } : {}), ...(v.muted ? { muted: true } : {}) });
   };
 
   const table = (el: El) => {
@@ -228,7 +261,23 @@ export function htmlToBlocks(root: El, base?: string): Block[] {
         figure(child);
         continue;
       }
+      if (tag === "VIDEO") {
+        movie(child);
+        continue;
+      }
       if (tag === "FIGURE") {
+        // A figure of figures, or of several pictures (a gallery): each stands on its own, and the
+        // gallery's own caption follows them as a note.
+        if (descendants(child, "FIGURE").length > 0 || descendants(child, "IMG").length + descendants(child, "VIDEO").length > 1) {
+          visit(child);
+          continue;
+        }
+        const vid = descendants(child, "VIDEO")[0];
+        if (vid) {
+          const cap = descendants(child, "FIGCAPTION")[0];
+          movie(vid, cap ? tidyRuns(inlineRuns(cap)) : []);
+          continue;
+        }
         const img = descendants(child, "IMG")[0];
         if (img) {
           const cap = descendants(child, "FIGCAPTION")[0];
