@@ -10,6 +10,7 @@ import { isIP } from "node:net";
 import { isPublicAddress, publicFetch, wasRefused, type PublicResponse } from "@/lib/public-net";
 import { parseHTML } from "linkedom";
 import { imageStem, leadImage, prepareImages } from "@/lib/images";
+import { keepSvgDiagrams } from "@/lib/svg-figures";
 import { Readability } from "@mozilla/readability";
 import { htmlToBlocks } from "@/lib/html-to-blocks";
 import { slugify, tidyTitle, undash, type Article, type Block } from "@/lib/article";
@@ -225,6 +226,13 @@ export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): P
     prepareImages(document as unknown as Document, target.toString());
   } catch {
     // Pictures are a bonus; never lose the article over them.
+  }
+
+  // Diagrams drawn as inline SVG, kept as pictures with the page's styling written into them.
+  try {
+    await keepSvgDiagrams(document as unknown as Document, target.toString(), `Mozilla/5.0 (compatible; ${APP_UA}; +reader)`);
+  } catch {
+    // The same: the article comes first.
   }
 
   let parsed: ReturnType<Readability["parse"]> = null;

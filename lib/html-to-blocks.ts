@@ -75,13 +75,15 @@ export function parseSrcset(s: string): { url: string; size: number }[] {
   return out;
 }
 
-/** An image worth showing: a real http(s) picture, not a spacer, tracking pixel or inline blob. */
+/** An image worth showing: a real http(s) picture or a kept inline diagram, not a spacer, tracking pixel or other inline blob. */
 function imageOf(img: El, base?: string): { src: string; alt?: string } | null {
   const attr = (n: string) => img.getAttribute?.(n) ?? null;
   const srcset = attr("srcset") ?? attr("data-srcset");
   // The largest candidate in a srcset reads best on a sharp screen.
   const fromSet = srcset ? parseSrcset(srcset).sort((a, b) => b.size - a.size)[0]?.url : undefined;
   const src0 = attr("src");
+  // A diagram drawn inline on the page, made a standalone picture by lib/svg-figures.ts.
+  if (src0?.startsWith("data:image/svg+xml;base64,")) return { src: src0, alt: clean(attr("alt")) || undefined };
   const raw = fromSet ?? (src0 && !src0.startsWith("data:") ? src0 : attr("data-src"));
   if (!raw) return null;
   let src: string;

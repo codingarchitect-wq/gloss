@@ -36,7 +36,7 @@ export const isPlaceholder = (url: string) => PLACEHOLDER.test(url);
 const NOT_A_PICTURE = /gravatar\.com|\/avatars?\/|profile_image|\/emoji\/|\/icons?\/|favicon/i;
 
 /** Where pictures that are not part of the article live. */
-const CHROME = "header, nav, footer, aside, form, [role=banner], [role=navigation], [role=contentinfo], [role=complementary]";
+export const CHROME = "header, nav, footer, aside, form, [role=banner], [role=navigation], [role=contentinfo], [role=complementary]";
 const NOT_ARTICLE = /related|recommend|promo|newsletter|subscribe|share|social|comment|sidebar|avatar|author|byline|advert|sponsor|teaser|carousel|gallery-nav|menu|breadcrumb|(^|[-_ ])ad([-_ ]|$)/i;
 
 /** The largest candidate in a srcset, or null. */
@@ -186,7 +186,7 @@ function darkOnly(img: Element, src: string): boolean {
   return false;
 }
 
-function hasJunkAncestor(el: Element): boolean {
+export function hasJunkAncestor(el: Element): boolean {
   for (let e = el.parentElement, k = 0; e && k < 8; e = e.parentElement, k++) {
     const sig = `${e.getAttribute("class") ?? ""} ${e.getAttribute("id") ?? ""} ${e.getAttribute("data-testid") ?? ""}`;
     if (NOT_ARTICLE.test(sig)) return true;
