@@ -1,6 +1,7 @@
 "use client";
 
 import type { LayoutBlock } from "@llamaindex/liteparse-wasm";
+import { LOCAL_USER_ID } from "./auth-mode";
 import { inlineMd, markdownBlocks, slugify, tidyTitle, undash, type Article, type Block } from "./article";
 import { readApiKey } from "./ask";
 
@@ -71,7 +72,7 @@ export async function pdfToArticle(file: File, onProgress?: PdfProgress): Promis
   const total = session.totalPages;
   const pages = Math.min(total, PDF_MAX_PAGES);
   const label = `${pages} page${pages === 1 ? "" : "s"}`;
-  if (pages > PDF_FREE_PAGES && !readApiKey()) {
+  if (pages > PDF_FREE_PAGES && !readApiKey() && !LOCAL_USER_ID) {
     session.free();
     throw new PdfError(`This PDF has ${pages} pages. PDFs over ${PDF_FREE_PAGES} pages use your own OpenRouter key, since every question sends the whole text.`, true);
   }

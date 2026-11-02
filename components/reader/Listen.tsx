@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { LOCAL_USER_ID } from "@/lib/auth-mode";
 import { create } from "zustand";
 import { Headphones, LoaderCircle, Pause, Play, Square } from "lucide-react";
 import { blockEl } from "@/lib/anchor";
@@ -142,8 +143,8 @@ async function playAt(i: number, s: number) {
 
 export function startListening(ix: DocIndex, fromBlock: string | null) {
   stopListening();
-  // Reading aloud always uses the reader's own key: say so before anything is fetched.
-  if (!readApiKey()) {
+  // Reading aloud uses the reader's own key (on a personal instance, the server's key is theirs): say so before anything is fetched.
+  if (!readApiKey() && !LOCAL_USER_ID) {
     useListen.setState({ status: "error", needKey: true, error: "Reading aloud uses your own OpenRouter key." });
     return;
   }

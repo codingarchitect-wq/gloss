@@ -1,5 +1,6 @@
 import { needKey } from "@/lib/quota";
-import { llmHeaders } from "@/lib/llm";
+import { llmHeaders, serverKey } from "@/lib/llm";
+import { LOCAL_USER_ID } from "@/lib/auth-mode";
 import { TTS_MAX_CHARS, TTS_MODEL, TTS_URL, TTS_VOICE } from "@/lib/voice";
 
 export const runtime = "nodejs";
@@ -22,7 +23,8 @@ export async function POST(req: Request) {
 
   const headerKey = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "").trim();
   // Reading aloud is never on the shared key: a minute of voice costs more than a day of free answers.
-  const apiKey = body.apiKey?.trim() || headerKey || undefined;
+  // On a personal instance (lib/auth-mode.ts) the server's key is the owner's own, so it is used.
+  const apiKey = body.apiKey?.trim() || headerKey || (LOCAL_USER_ID ? serverKey() : undefined);
   if (!apiKey) return needKey(null, "Reading aloud uses your own OpenRouter API key. Add it to listen.");
 
   let res: Response;
