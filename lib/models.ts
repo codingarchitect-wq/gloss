@@ -1,6 +1,6 @@
 /**
  * The model allow-list and wire types. Safe to import on the client: no keys,
- * no fetches. lib/together.ts does the network side.
+ * no fetches. lib/llm.ts does the network side.
  */
 
 export type ModelEntry = {
@@ -30,13 +30,14 @@ export type ModelEntry = {
  */
 export const MODELS = {
   flash: {
-    id: "deepseek-ai/DeepSeek-V4.1-Flash",
+    id: "deepseek/deepseek-v4.1-flash",
     label: "DeepSeek V4.1 Flash",
     short: "Quick",
     blurb: "Answers in about half a second. Best for most questions.",
-    inPerM: 0.3,
+    // OpenRouter's list prices, checked 2026-11-02. Only a fallback: OpenRouter reports what each call cost.
+    inPerM: 0.045,
     cachedPerM: 0.006,
-    outPerM: 1.2,
+    outPerM: 0.5,
   },
 } as const satisfies Record<string, ModelEntry>;
 

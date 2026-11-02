@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth-server";
 import { makeToken } from "@/lib/agent";
 import { createToken, listTokens, revokeToken } from "@/lib/db";
 

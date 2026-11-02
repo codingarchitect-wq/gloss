@@ -14,7 +14,7 @@ import { readApiKey } from "./ask";
  *    glyphs) are rendered and read by a vision model on the server
  *    (/api/pdf-page), a few at a time.
  *
- * Longer PDFs need the reader's own Together key: every question sends the
+ * Longer PDFs need the reader's own OpenRouter key: every question sends the
  * whole text, so a book would spend a day's free use in a few questions.
  */
 
@@ -73,7 +73,7 @@ export async function pdfToArticle(file: File, onProgress?: PdfProgress): Promis
   const label = `${pages} page${pages === 1 ? "" : "s"}`;
   if (pages > PDF_FREE_PAGES && !readApiKey()) {
     session.free();
-    throw new PdfError(`This PDF has ${pages} pages. PDFs over ${PDF_FREE_PAGES} pages use your own Together key, since every question sends the whole text.`, true);
+    throw new PdfError(`This PDF has ${pages} pages. PDFs over ${PDF_FREE_PAGES} pages use your own OpenRouter key, since every question sends the whole text.`, true);
   }
 
   // Pass 1: the text layer, a batch at a time.
@@ -286,7 +286,7 @@ async function readByVision(lp: LP, bytes: Uint8Array, pageNums: number[], into:
           });
           const j = (await res.json()) as { markdown?: string; error?: string; code?: string };
           if (j.markdown) into.set(s.pageNum, markdownBlocks(htmlTablesToMarkdown(j.markdown)));
-          else if (j.code === "need_key") stop = new PdfError(j.error ?? "Add your Together key to read scanned pages.", true);
+          else if (j.code === "need_key") stop = new PdfError(j.error ?? "Add your OpenRouter key to read scanned pages.", true);
         } catch {}
         done++;
         onProgress?.(done / pageNums.length, label());

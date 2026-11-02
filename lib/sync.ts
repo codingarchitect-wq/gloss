@@ -164,7 +164,22 @@ export function startSync(userId: string) {
     const q = base.since ? `?since=${encodeURIComponent(new Date(Date.parse(base.since) - OVERLAP_MS).toISOString())}` : "";
     const res = await fetch(`/api/sync${q}`);
     if (!res.ok) throw new Error(`pull ${res.status}`);
-    const { now, changes } = (await res.json()) as { now: string; changes: RemoteChanges };
+    const { now, changes: pulled } = (await res.json()) as { now: string; changes: RemoteChanges };
+
+    // A change made here and not yet pushed wins over what the server sends: the pull overlaps the
+    // last one, so it brings back this device's own earlier pushes, and applying those would undo
+    // newer edits and bring back what was just removed. Skipped rows stay unpushed, so the next push
+    // sends them. A row that only repeats what is here already is skipped too.
+    const local = snapshot().entities;
+    const keep = (c: Collection, r: { id: string; data: unknown; deleted: boolean }) => {
+      const pushed = base.seen[c][r.id]?.[0];
+      const mine = local[c].get(r.id);
+      if (mine ? mine.key !== pushed : pushed !== undefined) return false;
+      return !(mine && !r.deleted && r.data && stable(r.data) === mine.key);
+    };
+    const changes = Object.fromEntries(
+      COLLECTIONS.map((c) => [c, ((pulled[c] ?? []) as { id: string; data: unknown; deleted: boolean }[]).filter((r) => keep(c, r))])
+    ) as RemoteChanges;
 
     // A text replaced on another device: drop this device's copy so it is fetched fresh on open.
     for (const r of changes.articles ?? []) {

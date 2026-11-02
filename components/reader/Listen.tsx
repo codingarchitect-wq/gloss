@@ -144,7 +144,7 @@ export function startListening(ix: DocIndex, fromBlock: string | null) {
   stopListening();
   // Reading aloud always uses the reader's own key: say so before anything is fetched.
   if (!readApiKey()) {
-    useListen.setState({ status: "error", needKey: true, error: "Reading aloud uses your own Together key." });
+    useListen.setState({ status: "error", needKey: true, error: "Reading aloud uses your own OpenRouter key." });
     return;
   }
   const blocks = ix.article.blocks;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Show, SignInButton } from "@clerk/nextjs";
+import { Show, SignInButton } from "@/lib/auth-client";
 import { Check, Copy, Download, Trash2, X } from "lucide-react";
 import { GlossMark } from "@/components/brand/Gloss";
 import { cmp } from "@/lib/anchor";

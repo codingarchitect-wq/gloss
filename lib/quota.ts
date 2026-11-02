@@ -1,6 +1,6 @@
 /**
- * The free allowance on the shared Together key, in dollars: what a reader's
- * answers and briefs actually cost Together, up to a small amount a day
+ * The free allowance on the shared OpenRouter key, in dollars: what a reader's
+ * answers and briefs actually cost on OpenRouter, up to a small amount a day
  * (more when signed in). After that they bring their own key, which is never
  * counted. A ceiling across everyone keeps a rush of visitors bounded.
  * Reading aloud is never free: it uses the reader's own key.
@@ -11,9 +11,10 @@
  */
 
 import { createHash } from "node:crypto";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "./auth-server";
 import { db } from "./db";
 import { allow, clientId } from "./ratelimit";
+import { LOCAL_USER_ID } from "./auth-mode";
 
 /** Dollars a day on the shared key: per reader, and across all readers. */
 export const FREE_USD = { anon: 0.1, user: 0.2 } as const;
@@ -70,6 +71,9 @@ export async function checkFreeUser(userId: string, burst = 60): Promise<FreeSta
 }
 
 async function check(w: { subject: string; limit: number; signedIn: boolean }, burst: number): Promise<FreeState> {
+  // A personal instance (lib/auth-mode.ts): the shared key is the owner's own, so there is no allowance to hold
+  // them to. What it spends is still recorded by chargeFree.
+  if (LOCAL_USER_ID) return { ok: true, left: 1, signedIn: true, subject: w.subject };
   // A burst guard, so a script cannot fire many requests before their costs land.
   if (!allow(`burst:${w.subject}`, burst, 60_000)) return { ok: false, left: 1, signedIn: w.signedIn, subject: w.subject, reason: "burst" };
   const s = await spent(w.subject);
@@ -101,6 +105,7 @@ export async function chargeFree(subject: string, usd: number) {
 /** Today's allowance without using any of it, for the key menu. */
 export async function peekFree(req: Request): Promise<{ left: number; signedIn: boolean }> {
   const w = await who(req);
+  if (LOCAL_USER_ID) return { left: 1, signedIn: true };
   const s = await spent(w.subject);
   return { left: s.all >= FREE_USD_ALL ? 0 : Math.max(0, 1 - s.mine / w.limit), signedIn: w.signedIn };
 }
@@ -111,11 +116,11 @@ export function needKey(state: FreeState | null, message?: string): Response {
   const error =
     message ??
     (!state
-      ? "Add your Together API key to start. It stays in this browser."
+      ? "Add your OpenRouter API key to start. It stays in this browser."
       : state.reason === "everyone"
-        ? "Free answers are resting for today. Add your Together API key to keep going."
+        ? "Free answers are resting for today. Add your OpenRouter API key to keep going."
         : state.signedIn
-          ? "That's today's free reading. Add your Together API key to keep going, or come back tomorrow."
-          : "That's today's free reading. Sign in for more, or add your Together API key to keep going.");
+          ? "That's today's free reading. Add your OpenRouter API key to keep going, or come back tomorrow."
+          : "That's today's free reading. Sign in for more, or add your OpenRouter API key to keep going.");
   return Response.json({ error, code: "need_key", signIn: Boolean(state && !state.signedIn && state.reason === "reader") }, { status: state ? 429 : 401, headers: { "X-Free-Left": "0" } });
 }

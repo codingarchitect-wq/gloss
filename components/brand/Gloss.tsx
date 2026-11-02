@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { TogetherLink } from "./Together";
+import { ProviderLink } from "./Provider";
 
 /** Lines of text with a note in the margin: the whole idea in 24px. */
 export function GlossMark({ className = "size-6" }: { className?: string }) {
@@ -14,7 +14,7 @@ export function GlossMark({ className = "size-6" }: { className?: string }) {
 
 /**
  * The wordmark. The serif's line box is set to its own size and nudged so
- * the word's cap height is centered on the mark and the Together logo.
+ * the word's cap height is centered on the mark and the provider's name.
  */
 export function GlossWordmark() {
   return (
@@ -27,7 +27,7 @@ export function GlossWordmark() {
   );
 }
 
-/** The app's mark, a hairline, then Together as the maker. */
+/** The app's mark, a hairline, then who serves the models. */
 export function Lockup({ href = "/" }: { href?: string }) {
   return (
     <div className="flex h-9 items-center gap-3.5 max-[380px]:gap-2.5">
@@ -35,7 +35,7 @@ export function Lockup({ href = "/" }: { href?: string }) {
         <GlossWordmark />
       </Link>
       <span aria-hidden className="h-[18px] w-px bg-rule-strong" />
-      <TogetherLink />
+      <ProviderLink />
     </div>
   );
 }

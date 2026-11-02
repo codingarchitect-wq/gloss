@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { SignInButton, useAuth } from "@clerk/nextjs";
+import { CLERK_ENABLED, SignInButton, useAuth } from "@/lib/auth-client";
 import { Toast } from "@/components/reader/Overlays";
 import { useStore } from "@/lib/store";
 
@@ -53,7 +53,8 @@ export function SignInNudge() {
     return () => clearTimeout(t);
   }, [open]);
 
-  if (!open || isSignedIn) return null;
+  // Without accounts there is nowhere to sign in to.
+  if (!open || isSignedIn || !CLERK_ENABLED) return null;
   return (
     <Toast onClose={() => setOpen(false)}>
       <span>Kept in this browser. Sign in to have it on every device.</span>

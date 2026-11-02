@@ -1,17 +1,78 @@
 /**
  * Postgres on Neon, over its HTTP driver: one round trip per query, no pool
- * to manage in serverless functions. Server-side only.
+ * to manage in serverless functions. Any other Postgres (a Docker container on
+ * your own machine, say) goes through node-postgres instead, behind the same
+ * two calls. The URL's host picks the driver; DATABASE_DRIVER=neon|pg overrides
+ * it. Server-side only.
  */
 
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
+import { Pool } from "pg";
 
-let client: NeonQueryFunction<false, false> | null = null;
+type Row = Record<string, any>;
+/** A query that runs when awaited, or that transaction() runs together with others. */
+type Query = PromiseLike<Row[]>;
+type Sql = {
+  query(text: string, params?: unknown[]): Query;
+  transaction(queries: Query[]): Promise<Row[][]>;
+};
 
-export function db() {
+export function driverFor(url: string, forced = process.env.DATABASE_DRIVER): "neon" | "pg" {
+  if (forced === "neon" || forced === "pg") return forced;
+  try {
+    return new URL(url).hostname.endsWith(".neon.tech") ? "neon" : "pg";
+  } catch {
+    return "pg";
+  }
+}
+
+/** Neon's queries are lazy, so they can be handed to a transaction; these are too. */
+class PgQuery implements PromiseLike<Row[]> {
+  private run?: Promise<Row[]>;
+  constructor(
+    private pool: Pool,
+    readonly text: string,
+    readonly params: unknown[] = []
+  ) {}
+  then<A = Row[], B = never>(ok?: ((rows: Row[]) => A | PromiseLike<A>) | null, bad?: ((e: unknown) => B | PromiseLike<B>) | null): PromiseLike<A | B> {
+    this.run ??= this.pool.query(this.text, this.params).then((r) => r.rows);
+    return this.run.then(ok, bad);
+  }
+}
+
+function pgSql(url: string): Sql {
+  // One pool per process, kept across dev reloads so they don't each open new connections.
+  const g = globalThis as { __glossPool?: Pool };
+  const pool = (g.__glossPool ??= new Pool({ connectionString: url, max: 5 }));
+  pool.removeAllListeners("error");
+  pool.on("error", (e) => console.error("db: idle connection failed", e));
+  return {
+    query: (text, params) => new PgQuery(pool, text, params),
+    async transaction(queries) {
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        const out: Row[][] = [];
+        for (const q of queries as PgQuery[]) out.push((await client.query(q.text, q.params)).rows);
+        await client.query("commit");
+        return out;
+      } catch (e) {
+        await client.query("rollback").catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+let client: Sql | null = null;
+
+export function db(): Sql {
   if (!client) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set.");
-    client = neon(url);
+    client = driverFor(url) === "neon" ? (neon(url) as unknown as Sql) : pgSql(url);
   }
   return client;
 }

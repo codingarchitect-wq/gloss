@@ -7,7 +7,7 @@ import { uid, useStore, type Anchor, type Gloss, type Turn } from "./store";
 import type { ModelKey, StreamEvent, Usage } from "./models";
 import { MODELS, modelOf } from "./models";
 
-const KEY_STORAGE = "together:api-key";
+const KEY_STORAGE = "openrouter:api-key";
 
 export function readApiKey(): string {
   try {

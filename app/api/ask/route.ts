@@ -1,5 +1,5 @@
 import { buildMessages, isLengthKey, webBlock, type DocPayload, type ThreadPayload } from "@/lib/prompts";
-import { DEFAULT_MODEL, isModelKey, streamChat, type ChatMessage, type StreamEvent } from "@/lib/together";
+import { DEFAULT_MODEL, isModelKey, serverKey, streamChat, type ChatMessage, type StreamEvent } from "@/lib/llm";
 import { ACTIONS } from "@/lib/actions";
 import { chargeFree, checkFree, estimateUsd, needKey } from "@/lib/quota";
 import { MODELS, type Usage } from "@/lib/models";
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   // No key of their own: a few cents of answers a day on the shared key, then they bring one.
   let free: Awaited<ReturnType<typeof checkFree>> | null = null;
   if (!apiKey) {
-    if (!process.env.TOGETHER_API_KEY) return needKey(null);
+    if (!serverKey()) return needKey(null);
     free = await checkFree(req);
     if (!free.ok) return needKey(free);
   }

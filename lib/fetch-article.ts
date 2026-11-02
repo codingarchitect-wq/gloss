@@ -1,40 +1,28 @@
 /**
  * Reading a web page into an Article, on the server: the link import, and
  * anything an agent saves. Every redirect hop is checked against private,
- * loopback and link-local addresses before it is fetched.
+ * loopback and link-local addresses before it is fetched, and again by the
+ * socket itself as it connects (lib/public-net.ts).
  */
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { isPublicAddress, publicFetch, wasRefused, type PublicResponse } from "@/lib/public-net";
 import { parseHTML } from "linkedom";
 import { imageStem, leadImage, prepareImages } from "@/lib/images";
 import { Readability } from "@mozilla/readability";
 import { htmlToBlocks } from "@/lib/html-to-blocks";
 import { slugify, tidyTitle, undash, type Article, type Block } from "@/lib/article";
-import { APP_UA } from "@/lib/together";
+import { APP_UA } from "@/lib/llm";
 
 const MAX_BYTES = 6_000_000;
 const MAX_PDF_BYTES = 25_000_000;
 /** Fewer words than this is a page whose article never reached the HTML. The shortest real one on a tested shelf had 220. */
 const MIN_WORDS = 80;
 
-/** Refuse anything that resolves to a private, loopback or link-local address. */
-function isPrivate(ip: string): boolean {
-  if (ip === "::1" || ip === "::" || ip.startsWith("fc") || ip.startsWith("fd") || ip.startsWith("fe80")) return true;
-  const v4 = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
-  const p = v4.split(".").map(Number);
-  if (p.length !== 4) return false;
-  return (
-    p[0] === 10 ||
-    p[0] === 127 ||
-    p[0] === 0 ||
-    (p[0] === 169 && p[1] === 254) ||
-    (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
-    (p[0] === 192 && p[1] === 168) ||
-    (p[0] === 100 && p[1] >= 64 && p[1] <= 127)
-  );
-}
+const NOT_REACHABLE = "That address is not reachable from here.";
 
+/** The link, if it is http(s) and every address it resolves to is public. A friendly early answer; publicFetch enforces it. */
 async function safeUrl(raw: string): Promise<URL | string> {
   let url: URL;
   try {
@@ -44,10 +32,10 @@ async function safeUrl(raw: string): Promise<URL | string> {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return "Only http and https links can be imported.";
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return "That address is not reachable from here.";
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return NOT_REACHABLE;
   try {
     const ips = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
-    if (ips.some(isPrivate)) return "That address is not reachable from here.";
+    if (!ips.length || !ips.every(isPublicAddress)) return NOT_REACHABLE;
   } catch {
     return "Could not find that site. Check the link.";
   }
@@ -154,11 +142,11 @@ export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): P
   if (kind === "video") return { ok: false, error: "That's a video, and Gloss reads text. Copy its transcript and use Paste text.", status: 422 };
 
   // Follow redirects by hand so every hop gets the same private-address check.
-  let res: Response | null = null;
+  let res: PublicResponse | null = null;
   let target: URL = checked;
   try {
     for (let hop = 0; hop < 5; hop++) {
-      res = await fetch(target, {
+      res = await publicFetch(target, {
         redirect: "manual",
         signal: AbortSignal.timeout(15_000),
         headers: {
@@ -168,11 +156,14 @@ export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): P
       });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
       if (!location) break;
+      // The redirect's own body is never read; let its connection go.
+      await res.body?.cancel().catch(() => {});
       const next = await safeUrl(new URL(location, target).toString());
       if (typeof next === "string") return { ok: false, error: next, status: 400 };
       target = next;
     }
-  } catch {
+  } catch (e) {
+    if (wasRefused(e)) return { ok: false, error: NOT_REACHABLE, status: 400 };
     return { ok: false, error: "The site did not answer in time.", status: 502 };
   }
   if (!res || !res.ok) {

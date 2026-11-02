@@ -6,12 +6,12 @@ import { validateKey } from "@/lib/ask";
 import { BRAND } from "@/lib/brand";
 import { Popover, barBtn } from "./Popover";
 
-const STORAGE_KEY = "together:api-key";
+const STORAGE_KEY = "openrouter:api-key";
 
 /** Today's free use of the shared key, as the share still unspent (0 to 1). */
 type Free = { left: number; signedIn: boolean };
 
-/** Bring your own Together key. Stored in this browser only. A little reading a day is free without one. */
+/** Bring your own OpenRouter key. Stored in this browser only. A little reading a day is free without one. */
 export function KeyMenu() {
   const [key, setKey] = useState("");
   const [house, setHouse] = useState<boolean | null>(null);
@@ -39,8 +39,8 @@ export function KeyMenu() {
 
   return (
     <Popover
-      label="Together API key"
-      tip={key ? "Using your Together key" : "Add your Together key"}
+      label="OpenRouter API key"
+      tip={key ? "Using your OpenRouter key" : "Add your OpenRouter key"}
       width={320}
       triggerClass={barBtn}
       openOn="gloss:key"
@@ -85,7 +85,7 @@ function KeyPanel({ current, house, free, onSave, close }: { current: string; ho
 
   return (
     <div>
-      <p className="text-[13.5px] font-medium text-ink">Your Together API key</p>
+      <p className="text-[13.5px] font-medium text-ink">Your OpenRouter API key</p>
       <p className="mt-1 text-[12.5px] leading-snug text-ink-3">
         {current
           ? "Answers and reading aloud use your key, with no daily limit."
@@ -113,17 +113,17 @@ function KeyPanel({ current, house, free, onSave, close }: { current: string; ho
           setState("idle");
         }}
         onKeyDown={(e) => e.key === "Enter" && save()}
-        placeholder="tgp_v1_..."
+        placeholder="sk-or-v1-..."
         autoComplete="off"
         spellCheck={false}
-        aria-label="Together API key"
+        aria-label="OpenRouter API key"
         className="mt-3 h-9 w-full rounded-lg border border-rule bg-bg px-3 text-[13px] tracking-wide text-ink outline-none focus-visible:outline-none placeholder:text-ink-4 focus:border-rule-strong"
       />
-      {state === "bad" && <p className="mt-2 text-[12.5px] text-rubric-text">Together rejected that key. Check it and try again.</p>}
+      {state === "bad" && <p className="mt-2 text-[12.5px] text-rubric-text">OpenRouter rejected that key. Check it and try again.</p>}
       <p className="mt-2 text-[11.5px] leading-snug text-ink-4">Sent with your requests only. Stored in this browser, never on a server, never logged.</p>
       <div className="mt-3 flex items-center justify-between">
         <a href={BRAND.keysUrl} target="_blank" rel="noopener noreferrer" className="text-[12.5px] text-rubric-text underline decoration-rule-strong underline-offset-4">
-          Get a key on Together
+          Get a key on OpenRouter
         </a>
         <div className="flex gap-1.5">
           {current && (

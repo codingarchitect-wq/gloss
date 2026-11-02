@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth-server";
 import { isCollection, pullRows, pushRows, type Collection, type PushRow } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -18,6 +18,7 @@ type InRow = { id: string; articleId: string; data: unknown; deleted?: boolean; 
 export async function GET(req: Request) {
   const { userId } = await auth();
   if (!userId) return Response.json({ error: "Sign in to sync." }, { status: 401 });
+  if (!process.env.DATABASE_URL) return Response.json({ error: "There is no database on this server." }, { status: 503 });
   const raw = new URL(req.url).searchParams.get("since");
   const since = raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : "1970-01-01T00:00:00Z";
   return Response.json(await pullRows(userId, since));
@@ -27,6 +28,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const { userId } = await auth();
   if (!userId) return Response.json({ error: "Sign in to sync." }, { status: 401 });
+  if (!process.env.DATABASE_URL) return Response.json({ error: "There is no database on this server." }, { status: 503 });
   if (Number(req.headers.get("content-length") ?? 0) > MAX_BODY) return Response.json({ error: "Too large." }, { status: 413 });
 
   let body: { changes?: Record<string, InRow[]> };

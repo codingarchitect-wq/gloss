@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth-server";
 import { articleDoc } from "@/lib/db";
 
 export const runtime = "nodejs";

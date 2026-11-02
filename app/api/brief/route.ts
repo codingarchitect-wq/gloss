@@ -1,5 +1,5 @@
 import { BRIEF_TASK, systemFor, type DocPayload } from "@/lib/prompts";
-import { completeJSON, DEFAULT_MODEL, isModelKey } from "@/lib/together";
+import { completeJSON, DEFAULT_MODEL, isModelKey, serverKey } from "@/lib/llm";
 import { undash, type BriefData } from "@/lib/article";
 import { chargeFree, checkFree, estimateUsd, needKey } from "@/lib/quota";
 import { MODELS } from "@/lib/models";
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   // A gloss of the whole text spends from the same free allowance.
   let free: Awaited<ReturnType<typeof checkFree>> | null = null;
   if (!apiKey) {
-    if (!process.env.TOGETHER_API_KEY) return needKey(null);
+    if (!serverKey()) return needKey(null);
     free = await checkFree(req);
     if (!free.ok) return needKey(free);
   }

@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+.claude
+# Keys stay out of the image; docker-compose.yml passes them in at run time.
+.env*
+!.env.example
+*.tsbuildinfo
+next-env.d.ts
+scripts/image-eval
+scripts/pdf-eval
+Dockerfile
+docker-compose.yml

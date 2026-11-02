@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth-server";
 import { Landing } from "@/components/landing/Landing";
 
 export const metadata: Metadata = { title: "Gloss", alternates: { canonical: "/" } };

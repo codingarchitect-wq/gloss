@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { ArrowRight } from "lucide-react";
-import { SignInButton } from "@clerk/nextjs";
+import { SignInButton } from "@/lib/auth-client";
 import { tidyTitle } from "@/lib/article";
 import { SAMPLES } from "@/lib/samples";
 import { useStore } from "@/lib/store";

@@ -1,11 +1,11 @@
 /**
- * Read aloud: Cartesia on Together. Sonic 3 is the newest Cartesia model
- * served serverless (Sonic 3.5 is listed, but only on dedicated endpoints;
- * checked 2026-10-09). Swap the id here when that changes.
+ * Read aloud: MAI-Voice 2.1 Flash through OpenRouter's speech API, which
+ * streams MP3 back. Any voice OpenRouter lists for the model works here
+ * (GET /api/v1/models?output_modalities=speech, its supported_voices).
  */
-export const TTS_URL = "https://api.together.xyz/v1/audio/speech";
-export const TTS_MODEL = "cartesia/sonic-3";
-/** "Marian - Poised Narrator": even and unhurried, made for long reading. */
-export const TTS_VOICE = "26403c37-80c1-4a1a-8692-540551ca2ae5";
+export const TTS_URL = "https://openrouter.ai/api/v1/audio/speech";
+export const TTS_MODEL = "microsoft/mai-voice-2.1-flash";
+/** A calm American voice, for long reading. */
+export const TTS_VOICE = "en-US-Harper:MAI-Voice-2.1-Flash";
 /** One request's worth of text. Paragraphs past this are split at sentence ends. */
 export const TTS_MAX_CHARS = 1200;

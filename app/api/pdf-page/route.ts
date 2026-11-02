@@ -1,16 +1,15 @@
 import { chargeFree, checkFree, needKey } from "@/lib/quota";
-import { APP_UA, TOGETHER_URL } from "@/lib/together";
+import { CHAT_URL, llmHeaders, reportedCost, serverKey } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 /**
  * One PDF page the text layer cannot give us (a scan, an image of text, garbled
- * glyphs), read by a vision model into Markdown. Qwen3.8 Flash is the vision
- * model Together serves per request; the dedicated OCR models (GLM-OCR,
- * DeepSeek-OCR-2) need their own endpoint. Checked 2026-10-10.
+ * glyphs), read by a vision model into Markdown: Qwen3.8 Flash, through
+ * OpenRouter. Prices below are only a fallback; OpenRouter reports each call's cost.
  */
-const MODEL = "Qwen/Qwen3.8-Flash";
+const MODEL = "qwen/qwen3.8-flash";
 const PRICE = { inPerM: 0.15, outPerM: 0.47 };
 /**
  * mode "layout": a page whose text layer reads but whose layout came out
@@ -18,7 +17,7 @@ const PRICE = { inPerM: 0.15, outPerM: 0.47 };
  * (lib/upgrade.ts). Qwen3.5-9B scored 6.9/10 on such pages in
  * scripts/pdf-eval against 3.9 for the text layer, at about $0.0005 a page.
  */
-const LAYOUT_MODEL = "Qwen/Qwen3.5-9B";
+const LAYOUT_MODEL = "qwen/qwen3.5-9b";
 const LAYOUT_PRICE = { inPerM: 0.17, outPerM: 0.25 };
 const MAX_IMAGE_CHARS = 3_500_000;
 
@@ -61,7 +60,7 @@ export async function POST(req: Request) {
   const own = body.apiKey?.trim() || headerKey || undefined;
   let free: Awaited<ReturnType<typeof checkFree>> | null = null;
   if (!own) {
-    if (!process.env.TOGETHER_API_KEY) return needKey(null);
+    if (!serverKey()) return needKey(null);
     free = await checkFree(req, 90);
     if (!free.ok) return needKey(free);
   }
@@ -72,17 +71,16 @@ export async function POST(req: Request) {
 
   let res: Response;
   try {
-    res = await fetch(TOGETHER_URL, {
+    res = await fetch(CHAT_URL, {
       method: "POST",
       signal: req.signal,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${own ?? process.env.TOGETHER_API_KEY}`, "User-Agent": APP_UA },
+      headers: llmHeaders((own ?? serverKey())!),
       body: JSON.stringify({
         model,
-        stream: true, // Qwen3.8 Flash only answers as a stream
-        stream_options: { include_usage: true },
+        stream: true,
         temperature: 0,
         max_tokens: 4096,
-        chat_template_kwargs: { enable_thinking: false },
+        reasoning: { enabled: false },
         messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: image } }, { type: "text", text: layout ? LAYOUT_PROMPT : PROMPT }] }],
       }),
     });
@@ -100,7 +98,7 @@ export async function POST(req: Request) {
 
   // Gather the stream: the content, and what it cost.
   let text = "";
-  type Usage = { prompt_tokens?: number; completion_tokens?: number };
+  type Usage = { prompt_tokens?: number; completion_tokens?: number; cost?: number };
   let usage: Usage | null = null;
   const reader = res.body.getReader();
   const dec = new TextDecoder();
@@ -123,7 +121,7 @@ export async function POST(req: Request) {
   }
 
   if (free) {
-    const cost = ((usage?.prompt_tokens ?? 1900) * price.inPerM + (usage?.completion_tokens ?? 1000) * price.outPerM) / 1_000_000;
+    const cost = reportedCost(usage ?? undefined) ?? ((usage?.prompt_tokens ?? 1900) * price.inPerM + (usage?.completion_tokens ?? 1000) * price.outPerM) / 1_000_000;
     await chargeFree(free.subject, cost);
   }
   return Response.json({ markdown: clean(text) });

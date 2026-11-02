@@ -11,7 +11,7 @@ type Props = {
   setUrl: (v: string) => void;
   busy: Busy;
   error: string | null;
-  /** The error is fixed by the reader's own Together key: offer the key menu. */
+  /** The error is fixed by the reader's own OpenRouter key: offer the key menu. */
   errorNeedsKey?: boolean;
   onSubmit: (url: string) => void;
   /** Keep it in the library for later, instead of reading it now. */
@@ -90,7 +90,7 @@ export const ImportBar = forwardRef<HTMLInputElement, Props>(function ImportBar(
             <>
               {" "}
               <button type="button" onClick={openKeyMenu} className="font-medium text-ink underline decoration-rule-strong underline-offset-4">
-                Add your Together key
+                Add your OpenRouter key
               </button>
             </>
           )}

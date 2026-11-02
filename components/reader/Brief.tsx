@@ -1,6 +1,6 @@
 "use client";
 
-import { Show, SignInButton } from "@clerk/nextjs";
+import { Show, SignInButton } from "@/lib/auth-client";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, ChevronDown, RotateCcw } from "lucide-react";
 import { fetchBrief, openKeyMenu } from "@/lib/ask";
@@ -51,7 +51,7 @@ export function Brief() {
         {brief.needKey && (
           <>
             <button type="button" onClick={openKeyMenu} className="font-medium text-ink underline decoration-rule-strong underline-offset-4">
-              Add your Together key
+              Add your OpenRouter key
             </button>
             <Show when="signed-out">
               <SignInButton mode="modal">
