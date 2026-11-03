@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Keyboard, NotebookPen } from "lucide-react";
+import Link from "next/link";
+import { Keyboard, Library, NotebookPen } from "lucide-react";
 import { Account } from "@/components/account/Account";
 import { Lockup } from "@/components/brand/Gloss";
 import { KeyMenu } from "@/components/ui/KeyMenu";
@@ -116,6 +117,11 @@ export function TopBar({ currentN, pastTitle, listenFrom }: { currentN: number |
         </div>
 
         <nav aria-label="Reader tools" className="flex items-center gap-1">
+          {/* Straight back to the shelves, where the home and library pages keep the same link. */}
+          <Link href="/library" className={`${barBtn} !px-3`} aria-label="Your library" data-tip="Back to your library">
+            <Library size={16} strokeWidth={1.8} />
+            <span className="hidden sm:inline">Library</span>
+          </Link>
           <span className="hidden sm:block">
             <button type="button" className={barBtn} onClick={() => setUI({ shortcutsOpen: true })} aria-label="Keyboard shortcuts" data-tip="Shortcuts" data-tip-kbd="?">
               <Keyboard size={17} strokeWidth={1.8} />
