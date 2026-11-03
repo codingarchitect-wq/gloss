@@ -101,6 +101,32 @@ async function publicTarget(host: string): Promise<string | null> {
   }
 }
 
+/**
+ * How long a server gets to accept a connection. Old pages point at servers long gone that never
+ * answer (an ad network's spacer image, say), and each wait held a copy up for monolith's whole
+ * timeout; one page took 91 s that way, 1 s for everything else.
+ */
+const CONNECT_MS = 10_000;
+/** A server that didn't answer is given up on for a while, so a page that points at it again doesn't wait again. */
+const DEAD_MS = 10 * 60_000;
+const dead = new Map<string, number>();
+
+function isDead(key: string): boolean {
+  const until = dead.get(key);
+  if (until && until > Date.now()) return true;
+  dead.delete(key);
+  return false;
+}
+
+/** Give up on a connection that isn't made in time, and remember the server for a while. */
+function connectDeadline(key: string, onTimeout: () => void): () => void {
+  const t = setTimeout(() => {
+    dead.set(key, Date.now() + DEAD_MS);
+    onTimeout();
+  }, CONNECT_MS);
+  return () => clearTimeout(t);
+}
+
 let proxy: Promise<string> | null = null;
 
 /** A forward proxy on 127.0.0.1 that connects only to public addresses, pinned to the one it checked. */
@@ -114,15 +140,22 @@ export function guardProxy(): Promise<string> {
       } catch {
         return res.writeHead(400).end();
       }
+      const port = Number(url.port) || 80;
+      const key = `${url.hostname}:${port}`;
+      if (url.protocol === "http:" && isDead(key)) return res.writeHead(504).end();
       const ip = url.protocol === "http:" ? await publicTarget(url.hostname) : null;
       if (!ip) return res.writeHead(403).end();
+      // A socket of its own (no agent), so every request connects, and the deadline covers just that.
       const up = http.request(
-        { host: ip, port: Number(url.port) || 80, method: req.method, path: url.pathname + url.search, headers: { ...req.headers, host: url.host }, setHost: false, timeout: 60_000 },
+        { host: ip, port, method: req.method, path: url.pathname + url.search, headers: { ...req.headers, host: url.host }, setHost: false, agent: false, timeout: 60_000 },
         (r) => {
           res.writeHead(r.statusCode ?? 502, r.headers);
           r.pipe(res);
         }
       );
+      const connected = connectDeadline(key, () => up.destroy(new Error("no answer")));
+      up.on("socket", (s) => s.once("connect", connected));
+      up.on("close", connected);
       up.on("error", () => res.headersSent || res.writeHead(502).end());
       up.on("timeout", () => up.destroy());
       req.pipe(up);
@@ -130,15 +163,22 @@ export function guardProxy(): Promise<string> {
     // https: a tunnel, opened only to a public address. TLS runs end to end, so monolith still checks the certificate's name.
     server.on("connect", async (req, client: net.Socket, head: Buffer) => {
       const m = /^(\[[^\]]+\]|[^:]+):(\d+)$/.exec(req.url ?? "");
+      if (m && isDead(req.url!)) return client.end("HTTP/1.1 504 Gateway Timeout\r\n\r\n");
       const ip = m ? await publicTarget(m[1]) : null;
       if (!m || !ip) return client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+      const connected = connectDeadline(req.url!, () => {
+        upstream.destroy();
+        client.end("HTTP/1.1 504 Gateway Timeout\r\n\r\n");
+      });
       const upstream = net.connect(Number(m[2]), ip, () => {
+        connected();
         client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
         if (head.length) upstream.write(head);
         upstream.pipe(client);
         client.pipe(upstream);
       });
       upstream.setTimeout(60_000, () => upstream.destroy());
+      upstream.on("close", connected);
       upstream.on("error", () => client.destroy());
       client.on("error", () => upstream.destroy());
     });
