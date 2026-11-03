@@ -5,7 +5,7 @@ import { findOriginal, originalsEnabled, queueOriginal } from "@/lib/originals";
 
 export const runtime = "nodejs";
 
-/** Save copies for every text on the shelf that came from a page or a PDF link and has none yet. */
+/** Save copies for every text on the shelf that came from a page, a PDF link or a video and has none yet. */
 export async function POST() {
   if (!originalsEnabled()) return Response.json({ error: "This server doesn't save copies." }, { status: 501 });
   const { userId } = await auth();

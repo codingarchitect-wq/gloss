@@ -31,6 +31,21 @@ const PAGE_HEADERS = {
  */
 const PDF_HEADERS = { ...COMMON, "Content-Type": "application/pdf", "Content-Security-Policy": "sandbox" };
 
+/** A video plays in the reader, and opens on its own sandboxed like the rest. */
+const VIDEO_HEADERS = { ...COMMON, "Content-Type": "video/mp4", "Content-Security-Policy": "sandbox" };
+
+/**
+ * The bytes a Range header asks for (one range, as players and PDF viewers send it), so a video can
+ * be played from anywhere in it. Undefined for the whole file, null for a range past the end.
+ */
+function rangeOf(header: string | null, size: number): { start: number; end: number } | null | undefined {
+  const m = header ? /^bytes=(\d*)-(\d*)$/.exec(header.trim()) : null;
+  if (!m || (!m[1] && !m[2])) return undefined;
+  const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+  const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  return start <= end && start < size ? { start, end } : null;
+}
+
 type Ctx = { params: Promise<{ id: string }> };
 
 async function who(): Promise<string | Response> {
@@ -39,16 +54,26 @@ async function who(): Promise<string | Response> {
   return userId ?? new Response(null, { status: 401 });
 }
 
-/** The copy of the page or PDF this text came from, as it was saved. */
-export async function GET(_req: Request, { params }: Ctx) {
+/** The copy of the page, PDF or video this text came from, as it was saved. */
+export async function GET(req: Request, { params }: Ctx) {
   const userId = await who();
   if (userId instanceof Response) return userId;
   const id = (await params).id;
   const copy = await findOriginal(userId, id);
   if (!copy) return Response.json({ error: "No saved copy of this text." }, { status: 404 });
-  const headers =
-    copy.kind === "pdf" ? { ...PDF_HEADERS, "Content-Disposition": `inline; filename="${id}.pdf"` } : PAGE_HEADERS;
-  return new Response(Readable.toWeb(openOriginal(copy)) as ReadableStream, { headers: { ...headers, "Content-Length": String(copy.size) } });
+  if (copy.kind === "page") {
+    return new Response(Readable.toWeb(openOriginal(copy)) as ReadableStream, { headers: { ...PAGE_HEADERS, "Content-Length": String(copy.size) } });
+  }
+  // A PDF or a video comes as it is, so a part of it can be asked for. (A page is sent gzipped, whole.)
+  const ext = copy.kind === "pdf" ? "pdf" : "mp4";
+  const headers = { ...(copy.kind === "pdf" ? PDF_HEADERS : VIDEO_HEADERS), "Content-Disposition": `inline; filename="${id}.${ext}"`, "Accept-Ranges": "bytes" };
+  const range = rangeOf(req.headers.get("range"), copy.size);
+  if (range === null) return new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${copy.size}` } });
+  if (!range) return new Response(Readable.toWeb(openOriginal(copy)) as ReadableStream, { headers: { ...headers, "Content-Length": String(copy.size) } });
+  return new Response(Readable.toWeb(openOriginal(copy, range)) as ReadableStream, {
+    status: 206,
+    headers: { ...headers, "Content-Length": String(range.end - range.start + 1), "Content-Range": `bytes ${range.start}-${range.end}/${copy.size}` },
+  });
 }
 
 /** Whether there is a copy: 200, 404 when there isn't, 501 when this server doesn't save them. */
@@ -58,15 +83,15 @@ export async function HEAD(_req: Request, { params }: Ctx) {
   return new Response(null, { status: (await findOriginal(userId, (await params).id)) ? 200 : 404 });
 }
 
-/** Save (or save again) a copy of the page or PDF this text came from. */
+/** Save (or save again) a copy of the page, PDF or video this text came from. */
 export async function POST(_req: Request, { params }: Ctx) {
   const userId = await who();
   if (userId instanceof Response) return userId;
   const id = (await params).id;
   const src = await articleSource(userId, id);
   const kind = src ? originalKind({ origin: src.origin, sourceUrl: src.url }) : null;
-  if (!kind) return Response.json({ error: "This text has no page or PDF to save." }, { status: 404 });
-  if (!queueOriginal(userId, id, src!.url, kind)) return Response.json({ error: "This server can't save copies of pages." }, { status: 501 });
+  if (!kind) return Response.json({ error: "This text has no page, PDF or video to save." }, { status: 404 });
+  if (!queueOriginal(userId, id, src!.url, kind)) return Response.json({ error: `This server can't save ${kind === "video" ? "videos" : "copies of pages"}.` }, { status: 501 });
   return Response.json({ queued: true }, { status: 202 });
 }
 

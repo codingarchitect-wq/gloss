@@ -10,7 +10,7 @@
 
 import { hashToken, looksLikeToken } from "./agent";
 import { normalizeUrl } from "./links";
-import { blockText, textToArticle, wordCount, type Article } from "./article";
+import { blockText, originalKind, textToArticle, wordCount, youtubeId, type Article } from "./article";
 import { shelfOf, shelveForUser, tokenUser, type ShelfRow } from "./db";
 import { arxivFullText, fetchArticle, notAnArticle } from "./fetch-article";
 import { TOPIC, TOPICS, isTopic, yearOf, type TopicKey } from "./library";
@@ -19,6 +19,7 @@ import { allow } from "./ratelimit";
 import { classify } from "./shelve";
 import { excerptOf } from "./excerpt";
 import { queueOriginal } from "./originals";
+import { ytdlpReady } from "./youtube";
 import type { LibraryItem } from "./store";
 
 const VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -30,7 +31,8 @@ const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://usegloss.io";
 
 const INSTRUCTIONS = `Gloss is a reader. This server is the reader's own library in Gloss: save articles to it, and look through what is there.
 When saving from social posts or bookmarks, send the URL of the article, essay or paper itself (the link inside the post), not the post. Gloss reads each page in, sorts it onto a topic, and it appears on the reader's shelves the next time they open Gloss.
-Gloss can't fetch posts on X and other social sites, videos, or pages behind a login. When the post itself is the piece (an X Article, a long post, a thread) or the reader wants a video's transcript, read it yourself and send the full text with save_text.`;
+Gloss can't fetch posts on X and other social sites, or pages behind a login. When the post itself is the piece (an X Article, a long post, a thread), read it yourself and send the full text with save_text.
+A YouTube link can be saved as it is: Gloss reads the video's captions as its text and keeps the video. Other videos, and YouTube where saving one fails, need their transcript sent with save_text.`;
 
 const TOOLS = [
   {
@@ -202,7 +204,7 @@ async function saveArticles(userId: string, args: Record<string, unknown>, via: 
   const one = async ({ url, key }: { url: string; key: string }): Promise<Saved> => {
     const kind = notAnArticle(url);
     if (kind === "social") return { url, status: "failed", reason: "This is a social post, not an article. Send the link the post points to, or, if the post is the piece, read it and send its text with save_text." };
-    if (kind === "video") return { url, status: "failed", reason: "This is a video, not an article. Gloss reads text: send its transcript with save_text." };
+    if (kind === "video" && !(youtubeId(url) && ytdlpReady())) return { url, status: "failed", reason: "This is a video, not an article. Gloss reads text: send its transcript with save_text." };
     const known = have.get(key);
     if (known) return { url, status: "already_saved", title: String(known.data.title ?? ""), topic: TOPIC[isTopic(known.data.topic) ? known.data.topic : "unsorted"].name };
     if (budget <= 0) return { url, status: "failed", reason: `The daily limit of ${PER_DAY} saves is reached. Try again tomorrow.` };
@@ -223,7 +225,8 @@ async function saveArticles(userId: string, args: Record<string, unknown>, via: 
     const { topic, tags, scene } = await sortOf(userId, a);
     const item = shelfItem(a, { topic, tags, scene, via });
     await shelveForUser(userId, item, a);
-    queueOriginal(userId, a.id, a.sourceUrl);
+    const copy = originalKind(a);
+    if (copy) queueOriginal(userId, a.id, a.sourceUrl, copy);
     have.set(key, { id: a.id, data: item as unknown as Record<string, unknown>, pct: 0 });
     return { url, status: "saved", title: a.title, topic: TOPIC[topic ?? "unsorted"].name };
   };

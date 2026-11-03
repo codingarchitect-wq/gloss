@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   }
   if (count > MAX_ROWS) return Response.json({ error: "Too many rows in one push." }, { status: 413 });
   await pushRows(userId, changes);
-  // Saved copies follow the shelf: one is made for a new text from a page or a PDF link, and goes with it.
+  // Saved copies follow the shelf: one is made for a new text from a page, a PDF link or a video, and goes with it.
   if (originalsEnabled()) {
     for (const r of changes.articles ?? []) {
       if (r.deleted) await removeOriginal(userId, r.id).catch(() => {});

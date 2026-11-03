@@ -23,6 +23,7 @@ import { GlossCard } from "./GlossCard";
 import { Lens, type OpenHighlight } from "./Lens";
 import { ListenBar } from "./Listen";
 import { SavedCopy } from "./SavedCopy";
+import { VideoPanel } from "./VideoPanel";
 import { SignInNudge } from "@/components/account/SignInNudge";
 import { Margin } from "./Margin";
 import { Notebook } from "./Notebook";
@@ -513,7 +514,8 @@ function ReaderInner({ article }: { article: Article }) {
                       {article.published && <span className="text-ink-3">{`  \u00b7  ${article.published}`}</span>}
                     </p>
                     <p className="mt-1 text-[13px] leading-snug text-ink-3">
-                      {readingMinutes(ix.words)} min read <span className="text-ink-4">{"\u00b7"}</span> {paraCount} paragraphs
+                      {article.video?.duration ? `${Math.max(1, Math.round(article.video.duration / 60))} min video, ${readingMinutes(ix.words)} min to read` : `${readingMinutes(ix.words)} min read`}{" "}
+                      <span className="text-ink-4">{"\u00b7"}</span> {paraCount} paragraphs
                     </p>
                   </div>
                   {(article.sourceUrl || article.origin === "file") && (
@@ -532,6 +534,7 @@ function ReaderInner({ article }: { article: Article }) {
                     </div>
                   )}
                 </div>
+                {article.video && <VideoPanel article={article} />}
                 <CarefulRead article={article} />
                 <div className="focus-hide rise" style={{ animationDelay: "200ms" }}>
                   <Brief />

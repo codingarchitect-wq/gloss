@@ -13,8 +13,9 @@ import { imageStem, leadImage, prepareImages } from "@/lib/images";
 import { keepSvgDiagrams } from "@/lib/svg-figures";
 import { Readability } from "@mozilla/readability";
 import { htmlToBlocks } from "@/lib/html-to-blocks";
-import { slugify, tidyTitle, undash, type Article, type Block } from "@/lib/article";
+import { slugify, tidyTitle, undash, youtubeId, type Article, type Block } from "@/lib/article";
 import { APP_UA } from "@/lib/llm";
+import { youtubeArticle, ytdlpReady } from "@/lib/youtube";
 
 const MAX_BYTES = 6_000_000;
 const MAX_PDF_BYTES = 25_000_000;
@@ -138,6 +139,15 @@ export type FetchResult =
 export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): Promise<FetchResult> {
   const checked = await safeUrl((opts.pdf && arxivFullText(raw, "pdf")) || raw.trim());
   if (typeof checked === "string") return { ok: false, error: checked, status: 400 };
+  // A YouTube video reads as its transcript, where this server has yt-dlp (lib/youtube.ts).
+  const yt = youtubeId(checked.toString());
+  if (yt && ytdlpReady()) {
+    try {
+      return { ok: true, article: await youtubeArticle(yt) };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Could not read that video.", status: 502 };
+    }
+  }
   const kind = notAnArticle(checked.toString());
   if (kind === "social") return { ok: false, error: "That's a post, not an article. Open the link it shares, or copy the post and use Paste text.", status: 422 };
   if (kind === "video") return { ok: false, error: "That's a video, and Gloss reads text. Copy its transcript and use Paste text.", status: 422 };

@@ -25,7 +25,8 @@ export function SavedCopy({ article }: { article: Article }) {
   const kind = originalKind(article);
   /** A file dropped in (a PDF, or text, which has nothing to keep): only this browser has it. */
   const dropped = kind === null && article.origin === "file";
-  const fromPage = kind !== null || dropped;
+  // A video's copy plays above its transcript (VideoPanel), so it needs nothing here.
+  const fromPage = (kind !== null && kind !== "video") || dropped;
   const words =
     kind === "pdf" || dropped
       ? { saved: "Saved PDF", saving: "Saving the PDF", save: "Save the PDF", tip: "The PDF as it was published, kept on this machine", ask: "Keep the PDF on this machine" }

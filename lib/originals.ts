@@ -1,31 +1,32 @@
 /**
  * Saved copies of the originals, for when the reader wants to see a text as it was published.
  * A page: everything it is made of (styles, pictures, fonts, scripts, video) packed into one HTML
- * file by monolith (github.com/Y2Z/monolith). A PDF link: the PDF itself. Server-side only, and
- * only where GLOSS_ORIGINALS_DIR is set; pages also need monolith (the Docker image has both).
+ * file by monolith (github.com/Y2Z/monolith). A PDF link: the PDF itself. A YouTube video: the
+ * video at 360p (lib/youtube.ts). Server-side only, and only where GLOSS_ORIGINALS_DIR is set;
+ * pages also need monolith, videos yt-dlp (the Docker image has both).
  *
- * Copies are made in the background after an import, two at a time, and kept on disk as
- * <dir>/<reader>/<article id>.html.gz (gzipped) or .pdf. A page's copy is cut off from the
- * internet when it is opened (monolith -I), so it works offline and can't report back to anyone.
+ * Copies are made in the background after an import, two at a time (and one video at a time
+ * beside them), kept on disk as <dir>/<reader>/<article id>.html.gz (gzipped), .pdf or .mp4.
+ * A page's copy is cut off from the internet when it is opened (monolith -I), so it works
+ * offline and can't report back to anyone.
  *
  * monolith fetches whatever a page points at, so all of its traffic goes through a small proxy
- * here that only connects to public addresses, checked when the socket opens (lib/public-net.ts):
- * a page can't use a copy to reach this machine, its database or the local network.
+ * that only connects to public addresses (lib/guard-proxy.ts): a page can't use a copy to reach
+ * this machine, its database or the local network.
  */
 
 import { spawn, spawnSync } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import http from "node:http";
-import net from "node:net";
-import { lookup } from "node:dns/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
-import { isPublicAddress } from "./public-net";
+import { guardProxy, publicTarget } from "./guard-proxy";
 import { APP_UA } from "./llm";
 import { fetchArticle } from "./fetch-article";
+import { youtubeId } from "./article";
+import { downloadVideo, ytdlpReady } from "./youtube";
 
 const DIR = process.env.GLOSS_ORIGINALS_DIR?.trim() || "";
 /** monolith flags: keep going past a failed asset (-e), accept odd certificates (-k), cut the copy off from the internet (-I). */
@@ -34,11 +35,15 @@ const MAX_RUN_MS = 240_000;
 const MAX_BYTES = 200_000_000;
 /** Less than this is an empty page: the document itself failed to load. */
 const MIN_BYTES = 512;
-const AT_ONCE = 2;
+/** At once: pages and PDFs, and beside them videos, which take minutes and shouldn't hold the rest up. */
+const LANES = { short: 2, video: 1 } as const;
+/** The largest video kept: two hours or so at 360p. */
+const MAX_VIDEO_BYTES = 2_000_000_000;
 const SAFE_ID = /^[\w.-]{1,160}$/;
 
-export type OriginalKind = "page" | "pdf";
-const EXT: Record<OriginalKind, string> = { page: ".html.gz", pdf: ".pdf" };
+export type OriginalKind = "page" | "pdf" | "video";
+const EXT: Record<OriginalKind, string> = { page: ".html.gz", pdf: ".pdf", video: ".mp4" };
+const KINDS = Object.keys(EXT) as OriginalKind[];
 
 /** Whether this server keeps copies: a directory to keep them in. */
 export function originalsEnabled(): boolean {
@@ -66,7 +71,7 @@ export type Original = { kind: OriginalKind; size: number; path: string };
 /** The copy kept for a text, if there is one. */
 export async function findOriginal(userId: string, id: string): Promise<Original | null> {
   if (!originalsEnabled()) return null;
-  for (const kind of ["page", "pdf"] as const) {
+  for (const kind of KINDS) {
     const path = fileFor(userId, id, kind);
     if (!path) return null;
     try {
@@ -76,119 +81,15 @@ export async function findOriginal(userId: string, id: string): Promise<Original
   return null;
 }
 
-/** A copy's file as a stream: gzipped HTML for a page, the PDF as it came. */
-export const openOriginal = (o: Original) => createReadStream(o.path);
+/** A copy's file as a stream, or the bytes `range` asks for: gzipped HTML for a page, a PDF or a video as it came. */
+export const openOriginal = (o: Original, range?: { start: number; end: number }) => createReadStream(o.path, range);
 
 export async function removeOriginal(userId: string, id: string): Promise<void> {
   if (!originalsEnabled()) return;
-  for (const kind of ["page", "pdf"] as const) {
+  for (const kind of KINDS) {
     const f = fileFor(userId, id, kind);
     if (f) await rm(f, { force: true });
   }
-}
-
-/* ---------- the proxy monolith goes through ---------- */
-
-/** The address to connect to, or null when a host resolves to anything that isn't public. */
-async function publicTarget(host: string): Promise<string | null> {
-  const h = host.replace(/^\[|\]$/g, "");
-  try {
-    const addrs = net.isIP(h) ? [{ address: h }] : await lookup(h, { all: true });
-    if (!addrs.length || addrs.some((a) => !isPublicAddress(a.address))) return null;
-    return addrs[0].address;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * How long a server gets to accept a connection. Old pages point at servers long gone that never
- * answer (an ad network's spacer image, say), and each wait held a copy up for monolith's whole
- * timeout; one page took 91 s that way, 1 s for everything else.
- */
-const CONNECT_MS = 10_000;
-/** A server that didn't answer is given up on for a while, so a page that points at it again doesn't wait again. */
-const DEAD_MS = 10 * 60_000;
-const dead = new Map<string, number>();
-
-function isDead(key: string): boolean {
-  const until = dead.get(key);
-  if (until && until > Date.now()) return true;
-  dead.delete(key);
-  return false;
-}
-
-/** Give up on a connection that isn't made in time, and remember the server for a while. */
-function connectDeadline(key: string, onTimeout: () => void): () => void {
-  const t = setTimeout(() => {
-    dead.set(key, Date.now() + DEAD_MS);
-    onTimeout();
-  }, CONNECT_MS);
-  return () => clearTimeout(t);
-}
-
-let proxy: Promise<string> | null = null;
-
-/** A forward proxy on 127.0.0.1 that connects only to public addresses, pinned to the one it checked. */
-export function guardProxy(): Promise<string> {
-  proxy ??= new Promise((resolve, reject) => {
-    const server = http.createServer(async (req, res) => {
-      // Plain http: the request line carries the whole URL.
-      let url: URL;
-      try {
-        url = new URL(req.url ?? "");
-      } catch {
-        return res.writeHead(400).end();
-      }
-      const port = Number(url.port) || 80;
-      const key = `${url.hostname}:${port}`;
-      if (url.protocol === "http:" && isDead(key)) return res.writeHead(504).end();
-      const ip = url.protocol === "http:" ? await publicTarget(url.hostname) : null;
-      if (!ip) return res.writeHead(403).end();
-      // A socket of its own (no agent), so every request connects, and the deadline covers just that.
-      const up = http.request(
-        { host: ip, port, method: req.method, path: url.pathname + url.search, headers: { ...req.headers, host: url.host }, setHost: false, agent: false, timeout: 60_000 },
-        (r) => {
-          res.writeHead(r.statusCode ?? 502, r.headers);
-          r.pipe(res);
-        }
-      );
-      const connected = connectDeadline(key, () => up.destroy(new Error("no answer")));
-      up.on("socket", (s) => s.once("connect", connected));
-      up.on("close", connected);
-      up.on("error", () => res.headersSent || res.writeHead(502).end());
-      up.on("timeout", () => up.destroy());
-      req.pipe(up);
-    });
-    // https: a tunnel, opened only to a public address. TLS runs end to end, so monolith still checks the certificate's name.
-    server.on("connect", async (req, client: net.Socket, head: Buffer) => {
-      const m = /^(\[[^\]]+\]|[^:]+):(\d+)$/.exec(req.url ?? "");
-      if (m && isDead(req.url!)) return client.end("HTTP/1.1 504 Gateway Timeout\r\n\r\n");
-      const ip = m ? await publicTarget(m[1]) : null;
-      if (!m || !ip) return client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
-      const connected = connectDeadline(req.url!, () => {
-        upstream.destroy();
-        client.end("HTTP/1.1 504 Gateway Timeout\r\n\r\n");
-      });
-      const upstream = net.connect(Number(m[2]), ip, () => {
-        connected();
-        client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (head.length) upstream.write(head);
-        upstream.pipe(client);
-        client.pipe(upstream);
-      });
-      upstream.setTimeout(60_000, () => upstream.destroy());
-      upstream.on("close", connected);
-      upstream.on("error", () => client.destroy());
-      client.on("error", () => upstream.destroy());
-    });
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      resolve(typeof addr === "object" && addr ? `http://127.0.0.1:${addr.port}` : "");
-    });
-  });
-  return proxy;
 }
 
 /* ---------- making a copy ---------- */
@@ -213,33 +114,42 @@ function withStandIns(page: Buffer): Buffer[] {
 type Job = { userId: string; id: string; url: string; kind: OriginalKind };
 const queue: Job[] = [];
 const pending = new Set<string>();
-let running = 0;
+const running = { short: 0, video: 0 };
+const laneOf = (kind: OriginalKind) => (kind === "video" ? "video" : "short");
 
 /**
- * Save a copy of the page an article came from, or of its PDF, in the background. False when this
- * server can't (copies are off, or a page and no monolith); true once it is on its way.
+ * Save a copy of the page an article came from, its PDF or its video, in the background. False when
+ * this server can't (copies are off, or no monolith for a page, no yt-dlp for a video); true once it
+ * is on its way.
  */
 export function queueOriginal(userId: string, id: string, url: string | undefined, kind: OriginalKind = "page"): boolean {
   if (!url || !/^https?:\/\//i.test(url) || !originalsEnabled() || !fileFor(userId, id, kind)) return false;
   if (kind === "page" && !canCopyPages()) return false;
+  if (kind === "video" && (!youtubeId(url) || !ytdlpReady())) return false;
   const key = `${userId}/${id}`;
   if (pending.has(key)) return true;
   pending.add(key);
   queue.push({ userId, id, url, kind });
-  void drain();
+  drain();
   return true;
 }
 
-async function drain() {
-  while (running < AT_ONCE && queue.length) {
-    const job = queue.shift()!;
-    running++;
-    void (job.kind === "pdf" ? savePdf(job) : save(job))
+function drain() {
+  for (let i = 0; i < queue.length; ) {
+    const job = queue[i];
+    const lane = laneOf(job.kind);
+    if (running[lane] >= LANES[lane]) {
+      i++;
+      continue;
+    }
+    queue.splice(i, 1);
+    running[lane]++;
+    void (job.kind === "pdf" ? savePdf(job) : job.kind === "video" ? saveVideo(job) : save(job))
       .catch((e) => console.error(`originals: could not save ${job.url}:`, e instanceof Error ? e.message : e))
       .finally(() => {
-        running--;
+        running[lane]--;
         pending.delete(`${job.userId}/${job.id}`);
-        void drain();
+        drain();
       });
   }
 }
@@ -310,4 +220,23 @@ async function savePdf({ userId, id, url }: Job) {
   const bytes = Buffer.from(r.pdf);
   if (!(await storePdf(userId, id, bytes))) throw new Error("what came back is not a PDF");
   console.info(`originals: saved ${url} (${Math.round(bytes.length / 1024)} KB PDF)`);
+}
+
+/** A YouTube video at 360p, up to 2 GB. */
+async function saveVideo({ userId, id, url }: Job) {
+  const final = fileFor(userId, id, "video")!;
+  const part = `${final}.part`;
+  const started = Date.now();
+  await mkdir(join(DIR, userId), { recursive: true });
+  try {
+    await downloadVideo(youtubeId(url)!, part, MAX_VIDEO_BYTES);
+    // yt-dlp skips a video over the size limit without failing: then there is no file.
+    const size = await stat(part).then((s) => s.size, () => 0);
+    if (!size) throw new Error(`no video saved: it may be over ${MAX_VIDEO_BYTES / 1e9} GB at 360p`);
+    await rename(part, final);
+    console.info(`originals: saved ${url} (${Math.round(size / 1e6)} MB video, ${Math.round((Date.now() - started) / 1000)} s)`);
+  } finally {
+    await rm(part, { force: true });
+    await rm(`${part}.part`, { force: true });
+  }
 }

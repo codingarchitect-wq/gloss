@@ -2,7 +2,8 @@
 
 import { memo, useState, type ReactNode } from "react";
 import { MessageCirclePlus, Play } from "lucide-react";
-import type { Block as BlockT, Run } from "@/lib/article";
+import { clock, type Block as BlockT, type Run } from "@/lib/article";
+import { seekVideo } from "./VideoPanel";
 
 /** `note`: a highlight with the reader's note, set only in the block where it ends. */
 export type Mark = { from: number; to: number; kind: "gloss" | "hl" | "pending"; id: string; color?: string; note?: boolean };
@@ -219,6 +220,12 @@ function BlockImpl({ block, n, first, marks, activeGloss, hoverGloss, activeHigh
             <MessageCirclePlus size={12} strokeWidth={2} />
           </span>
           {n}
+        </button>
+      )}
+      {/* A video transcript's paragraph or chapter: when it is said. Outside the text, so offsets stay true. */}
+      {block.t !== undefined && (
+        <button type="button" className="blk-ts" onClick={() => seekVideo(block.t!)} aria-label={`Play from ${clock(block.t)}`}>
+          {clock(block.t)}
         </button>
       )}
       {block.type === "figure" && <Figure block={block} />}

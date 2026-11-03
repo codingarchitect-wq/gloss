@@ -29,7 +29,15 @@ export type Block = {
   head?: boolean;
   /** The PDF page it came from, so one page can be read again and swapped in alone. */
   page?: number;
+  /** Where a video's transcript reaches this paragraph or chapter, in seconds. */
+  t?: number;
 };
+
+/**
+ * A text that is a video's transcript (lib/youtube.ts). `captions`: where the text came from: the
+ * creator's captions, YouTube's own, a transcription made here, or none yet.
+ */
+export type VideoInfo = { youtube: string; duration?: number; captions: "manual" | "auto" | "transcribed" | "none"; lang?: string };
 
 export type Article = {
   id: string;
@@ -46,6 +54,8 @@ export type Article = {
   origin?: "sample" | "url" | "paste" | "file";
   /** PDF pages that looked hard (columns, tables, maths) and wait to be read again by a vision model (lib/upgrade.ts). */
   upgrade?: number[];
+  /** Set when the text is a video's transcript: the reader plays the video above it. */
+  video?: VideoInfo;
   addedAt?: number;
 };
 
@@ -57,13 +67,40 @@ export type BriefData = {
   sections: { title: string; start: number }[];
 };
 
+/** A YouTube video's id, from any of the links YouTube gives out; null for anything else. */
+export function youtubeId(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(/^https?:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.replace(/^(www|m|music)\./, "");
+  let id: string | null = null;
+  if (host === "youtu.be") id = u.pathname.split("/")[1] ?? null;
+  else if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    id = u.pathname === "/watch" ? u.searchParams.get("v") : (/^\/(?:shorts|live|embed|v)\/([^/?#]+)/.exec(u.pathname)?.[1] ?? null);
+  }
+  return id && /^[\w-]{11}$/.test(id) ? id : null;
+}
+
+/** Seconds as a clock: 75 is "1:15", 3725 is "1:02:05". */
+export function clock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
 /**
  * The original a server can keep for a text (lib/originals.ts): a copy of the page it came from,
- * or the PDF behind a PDF link. Null for pasted text, dropped files and the bundled shelf.
+ * the PDF behind a PDF link, or a YouTube video. Null for pasted text, dropped files and the bundled shelf.
  */
-export function originalKind(a: { origin?: unknown; sourceUrl?: unknown }): "page" | "pdf" | null {
+export function originalKind(a: { origin?: unknown; sourceUrl?: unknown }): "page" | "pdf" | "video" | null {
   if (typeof a.sourceUrl !== "string" || !/^https?:\/\//i.test(a.sourceUrl)) return null;
-  return a.origin === "url" ? "page" : a.origin === "file" ? "pdf" : null;
+  if (a.origin === "url") return youtubeId(a.sourceUrl) ? "video" : "page";
+  return a.origin === "file" ? "pdf" : null;
 }
 
 export const blockText = (b: Block) => b.runs.map((r) => r.text).join("");
