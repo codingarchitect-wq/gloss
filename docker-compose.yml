@@ -47,8 +47,13 @@ services:
     environment:
       DATABASE_URL: postgres://gloss:gloss@db:5432/gloss
       DATABASE_DRIVER: pg
+      # Whole copies of the original pages, made with monolith, in the gloss-originals volume.
+      GLOSS_ORIGINALS_DIR: /data/originals
+    volumes:
+      - gloss-originals:/data/originals
     ports:
       - "127.0.0.1:3100:3100"
 
 volumes:
   gloss-db:
+  gloss-originals:

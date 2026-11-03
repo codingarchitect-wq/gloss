@@ -34,6 +34,8 @@ To keep Gloss running on your own machine, with your library saved in a local Po
 1. Optionally, create `.env.local` with `OPENROUTER_API_KEY=` (and `EXA_API_KEY=`) for answers, topics and covers. Without one, you can still add your key in the app.
 2. Run `docker compose up -d --build` and open http://localhost:3100
 
+Each article you add from a link also gets a saved copy of its original page, with its styles, pictures, fonts and scripts, as one HTML file made with [monolith](https://github.com/Y2Z/monolith). Open it from **Saved copy** beside **Original** in the reader. A PDF keeps the file itself, under **Saved PDF**: fetched again from its link, or sent up by your browser when you dropped it in as a file (up to 25 MB). Copies live in the `gloss-originals` volume.
+
 This builds Gloss for one reader with no sign-in (`NEXT_PUBLIC_GLOSS_LOCAL_USER=1`), so both ports are bound to `127.0.0.1` only. Everything you save is kept in the `gloss-db` volume, which survives restarts and rebuilds (`docker compose down -v` deletes it). The database is also reachable from the Mac at `postgres://gloss:gloss@localhost:5442/gloss`.
 
 ## Future Tasks

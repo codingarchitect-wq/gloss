@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   // A self-contained server for the Docker image (see Dockerfile); other builds are unchanged.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   poweredByHeader: false,
+  experimental: {
+    // proxy.ts sees every request, and Next holds a request's body for it only up to this size; a
+    // dropped PDF sent up to be kept (app/api/originals/[id], up to 25 MB) must fit whole.
+    proxyClientMaxBodySize: "26mb",
+  },
   async headers() {
     return [
       {

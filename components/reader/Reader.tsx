@@ -22,6 +22,7 @@ import { ReaderContext, useMedia, useReader, type ReaderApi } from "./context";
 import { GlossCard } from "./GlossCard";
 import { Lens, type OpenHighlight } from "./Lens";
 import { ListenBar } from "./Listen";
+import { SavedCopy } from "./SavedCopy";
 import { SignInNudge } from "@/components/account/SignInNudge";
 import { Margin } from "./Margin";
 import { Notebook } from "./Notebook";
@@ -515,15 +516,20 @@ function ReaderInner({ article }: { article: Article }) {
                       {readingMinutes(ix.words)} min read <span className="text-ink-4">{"\u00b7"}</span> {paraCount} paragraphs
                     </p>
                   </div>
-                  {article.sourceUrl && (
-                    <a
-                      href={article.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-rule px-3.5 text-[13px] font-medium text-ink-2 transition-[border-color,color,transform] hover:border-rule-strong hover:text-ink active:scale-[0.97]"
-                    >
-                      Original <ArrowUpRight size={14} strokeWidth={2} />
-                    </a>
+                  {(article.sourceUrl || article.origin === "file") && (
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 empty:hidden">
+                      {article.sourceUrl && (
+                        <a
+                          href={article.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-rule px-3.5 text-[13px] font-medium text-ink-2 transition-[border-color,color,transform] hover:border-rule-strong hover:text-ink active:scale-[0.97]"
+                        >
+                          Original <ArrowUpRight size={14} strokeWidth={2} />
+                        </a>
+                      )}
+                      <SavedCopy article={article} />
+                    </div>
                   )}
                 </div>
                 <CarefulRead article={article} />

@@ -24,7 +24,8 @@ RUN npm run build
 FROM node:22-alpine AS run
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3100 HOSTNAME=0.0.0.0
-RUN addgroup -S gloss && adduser -S gloss -G gloss
+# monolith saves whole copies of original pages (lib/originals.ts); they live in /data/originals.
+RUN apk add --no-cache monolith && addgroup -S gloss && adduser -S gloss -G gloss && mkdir -p /data/originals && chown gloss:gloss /data/originals
 COPY --from=build --chown=gloss:gloss /app/.next/standalone ./
 COPY --from=build --chown=gloss:gloss /app/.next/static ./.next/static
 COPY --from=build --chown=gloss:gloss /app/public ./public

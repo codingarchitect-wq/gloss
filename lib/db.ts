@@ -133,6 +133,18 @@ function upsert(table: Collection): string {
       }`;
 }
 
+/** Where an article came from: its page and how it was added. */
+export async function articleSource(userId: string, id: string): Promise<{ url?: string; origin?: string } | null> {
+  const rows = await db().query("select data->>'sourceUrl' as url, data->>'origin' as origin from articles where user_id = $1 and id = $2 and not deleted", [userId, id]);
+  return rows.length ? { url: rows[0].url ?? undefined, origin: rows[0].origin ?? undefined } : null;
+}
+
+/** Every article on a reader's shelf, with its page and how it was added. */
+export async function articleSources(userId: string): Promise<{ id: string; url?: string; origin?: string }[]> {
+  const rows = await db().query("select id, data->>'sourceUrl' as url, data->>'origin' as origin from articles where user_id = $1 and not deleted", [userId]);
+  return rows.map((r) => ({ id: String(r.id), url: r.url ?? undefined, origin: r.origin ?? undefined }));
+}
+
 /* ---------- painted covers ---------- */
 
 export async function saveCover(userId: string, id: string, jpeg: Uint8Array): Promise<void> {

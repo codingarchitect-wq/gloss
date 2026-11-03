@@ -18,6 +18,7 @@ import { chargeFree, checkFreeUser } from "./quota";
 import { allow } from "./ratelimit";
 import { classify } from "./shelve";
 import { excerptOf } from "./excerpt";
+import { queueOriginal } from "./originals";
 import type { LibraryItem } from "./store";
 
 const VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -222,6 +223,7 @@ async function saveArticles(userId: string, args: Record<string, unknown>, via: 
     const { topic, tags, scene } = await sortOf(userId, a);
     const item = shelfItem(a, { topic, tags, scene, via });
     await shelveForUser(userId, item, a);
+    queueOriginal(userId, a.id, a.sourceUrl);
     have.set(key, { id: a.id, data: item as unknown as Record<string, unknown>, pct: 0 });
     return { url, status: "saved", title: a.title, topic: TOPIC[topic ?? "unsorted"].name };
   };

@@ -63,9 +63,39 @@ export async function keep(a: Article, file?: Blob, extra?: Partial<LibraryItem>
   if (!(await saveDoc(a))) return "This browser's storage is full. Remove something from your shelf and try again.";
   // The original is a nicety for reading it again; the text is what matters, so a failure here is quiet.
   if (file) await savePdf(a.id, file);
+  // A PDF dropped in as a file has no link the server could fetch it from, so it goes up from here.
+  if (file && a.origin === "file" && !a.sourceUrl) void uploadPdf(a.id, file);
   useStore.getState().addToLibrary(a, wordCount(a), extra);
   if (!extra?.topic) void shelveText(a);
   return null;
+}
+
+const uploads = new Map<string, Promise<UploadResult>>();
+
+/** "saved"; "off": the server keeps no copies, or not this one (too large, not a PDF); "failed": try again later. */
+export type UploadResult = "saved" | "off" | "failed";
+
+/**
+ * Send a dropped PDF to the server to keep as the text's original (app/api/originals/[id]). The
+ * server takes it once the text itself is there, which the sync does a moment after an import, so
+ * a 404 is tried again for a while. One upload per text at a time.
+ */
+export function uploadPdf(id: string, file: Blob): Promise<UploadResult> {
+  let p = uploads.get(id);
+  if (!p) {
+    p = (async (): Promise<UploadResult> => {
+      for (const wait of [3, 7, 20, 30, 60]) {
+        await new Promise((r) => setTimeout(r, wait * 1000));
+        const res = await fetch(`/api/originals/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: file }).catch(() => null);
+        if (res?.status === 201) return "saved";
+        // Not there yet (404) or a passing fault: wait and try again. Anything else won't change.
+        if (res && res.status !== 404 && (res.status < 500 || res.status === 501)) return "off";
+      }
+      return "failed";
+    })().finally(() => uploads.delete(id));
+    uploads.set(id, p);
+  }
+  return p;
 }
 
 export const looksLikeUrl = (s: string) => /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(s.trim()) && !/\s/.test(s.trim());

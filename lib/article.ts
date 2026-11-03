@@ -57,6 +57,15 @@ export type BriefData = {
   sections: { title: string; start: number }[];
 };
 
+/**
+ * The original a server can keep for a text (lib/originals.ts): a copy of the page it came from,
+ * or the PDF behind a PDF link. Null for pasted text, dropped files and the bundled shelf.
+ */
+export function originalKind(a: { origin?: unknown; sourceUrl?: unknown }): "page" | "pdf" | null {
+  if (typeof a.sourceUrl !== "string" || !/^https?:\/\//i.test(a.sourceUrl)) return null;
+  return a.origin === "url" ? "page" : a.origin === "file" ? "pdf" : null;
+}
+
 export const blockText = (b: Block) => b.runs.map((r) => r.text).join("");
 
 export const isHeading = (b: Block) => b.type === "h2" || b.type === "h3";
