@@ -102,13 +102,35 @@ export async function removeOriginal(userId: string, id: string): Promise<void> 
  */
 const STAND_INS = `<script>/* Gloss: storage for this saved copy, in memory only. */(function(){function mem(){var d={};return{get length(){return Object.keys(d).length},key:function(i){var k=Object.keys(d);return i<k.length?k[i]:null},getItem:function(k){k=String(k);return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},removeItem:function(k){delete d[String(k)]},clear:function(){d={}}}}["localStorage","sessionStorage"].forEach(function(n){try{window[n].length}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(_){}}});try{document.cookie}catch(e){var jar={};try{Object.defineProperty(document,"cookie",{configurable:true,get:function(){return Object.keys(jar).map(function(k){return k+"="+jar[k]}).join("; ")},set:function(v){var p=String(v).split(";")[0],i=p.indexOf("=");if(i>0)jar[p.slice(0,i).trim()]=p.slice(i+1)}})}catch(_){}}})();</script>`;
 
+/**
+ * A copy opens at its own address here (/api/originals/<id>), and a page whose scripts pick what to
+ * show by the address (Substack, and other apps that route in the browser) finds no page of theirs
+ * at that path and swaps the text it came with for its "Page not found". So before they run, the
+ * copy takes on the path it was saved from; a moment after it has loaded it gets its own address
+ * back, so the tab can still be reloaded. (Only the path changes: the host can't, and needn't.)
+ */
+function addressStandIn(url: string): string {
+  const u = new URL(url);
+  const was = JSON.stringify(u.pathname + u.search).replace(/</g, "\\u003c");
+  return `<script>/* Gloss: the address this copy was saved from, while its scripts start. */(function(){var here=location.pathname+location.search+location.hash,was=${was};try{history.replaceState(history.state,"",was)}catch(e){return}addEventListener("load",function(){setTimeout(function(){try{if(location.pathname+location.search===was)history.replaceState(history.state,"",here)}catch(e){}},1500)})})();</script>`;
+}
+
+/**
+ * A copy can't reach anyone and keeps no cookies past the tab, so its cookie banner asks about
+ * nothing, and can't be got rid of: the choice goes into a cookie, many banners then reload the
+ * page (Substack's does), the reload forgets it, and the banner is back. So copies hide them: the
+ * usual consent tools by name, and anything fixed on the screen that talks of cookies and offers a
+ * choice. They are looked for as the page builds itself, for half a minute after it has loaded.
+ */
+const NO_COOKIE_BANNERS = `<script>/* Gloss: no cookie banners, in a copy that keeps no cookies and can't reach anyone. */(function(){var SEL='#onetrust-consent-sdk,#CybotCookiebotDialog,#usercentrics-root,#usercentrics-cmp-ui,#didomi-host,.qc-cmp2-container,[id^="sp_message_container"],#cmplz-cookiebanner-container,.osano-cm-window,.cky-consent-container',COOKIE=/cookie/i,ASK=/accept|agree|reject|decline|consent|allow|deny|opt.?out|manage|preferences|settings|got it/i,SKIP={SCRIPT:1,STYLE:1,NOSCRIPT:1,TEMPLATE:1},t=0;function hide(el){el.style.setProperty("display","none","important")}function scan(){t=0;var b=document.body;if(!b)return;try{document.querySelectorAll(SEL).forEach(hide);var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT,{acceptNode:function(n){return n.nodeType===1?(SKIP[n.tagName]?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_SKIP):(COOKIE.test(n.data)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP)}}),seen=new Set(),n,el,top;while(n=w.nextNode()){top=null;for(el=n.parentElement;el&&el!==b;el=el.parentElement)if(getComputedStyle(el).position==="fixed"&&el.textContent.length<4000)top=el;if(top&&!seen.has(top)){seen.add(top);if(ASK.test(top.textContent)&&top.querySelector("button,[role=button],a[href],input"))hide(top)}}}catch(e){}}function soon(){if(!t)t=setTimeout(scan,250)}var mo=new MutationObserver(soon);document.addEventListener("DOMContentLoaded",function(){scan();mo.observe(document.body,{childList:true,subtree:true})});addEventListener("load",function(){soon();setTimeout(function(){mo.disconnect()},30000)})})();</script>`;
+
 /** The page with the stand-ins right after its <head> tag; unchanged when there is none near the top. */
-function withStandIns(page: Buffer): Buffer[] {
+function withStandIns(page: Buffer, url: string): Buffer[] {
   // latin1 maps every byte to one character, so the index found is a byte offset whatever the page's encoding.
   const m = /<head\b[^>]*>/i.exec(page.subarray(0, 1_000_000).toString("latin1"));
   if (!m) return [page];
   const at = m.index + m[0].length;
-  return [page.subarray(0, at), Buffer.from(STAND_INS), page.subarray(at)];
+  return [page.subarray(0, at), Buffer.from(STAND_INS + addressStandIn(url) + NO_COOKIE_BANNERS), page.subarray(at)];
 }
 
 type Job = { userId: string; id: string; url: string; kind: OriginalKind };
@@ -184,7 +206,7 @@ async function save({ userId, id, url }: Job) {
     if (size < MIN_BYTES) throw new Error("monolith saved nothing: the page could not be read");
     if (size > MAX_BYTES) throw new Error(`the copy is ${Math.round(size / 1e6)} MB, over the ${MAX_BYTES / 1e6} MB limit`);
     const page = await readFile(html);
-    await pipeline(Readable.from(withStandIns(page)), createGzip({ level: 6 }), createWriteStream(gz));
+    await pipeline(Readable.from(withStandIns(page, url)), createGzip({ level: 6 }), createWriteStream(gz));
     await rename(gz, final);
     console.info(`originals: saved ${url} (${Math.round(size / 1024)} KB, ${Math.round((Date.now() - started) / 1000)} s)`);
   } finally {
