@@ -40,6 +40,10 @@ Links you want to keep rather than read, like a GitHub repo, a package, a model 
 
 This builds Gloss for one reader with no sign-in (`NEXT_PUBLIC_GLOSS_LOCAL_USER=1`), so both ports are bound to `127.0.0.1` only. Everything you save is kept in the `gloss-db` volume, which survives restarts and rebuilds (`docker compose down -v` deletes it). The database is also reachable from the Mac at `postgres://gloss:gloss@localhost:5442/gloss`.
 
+To keep a copy somewhere else, like a NAS, run `scripts/backup.sh /Volumes/NAS/backups/gloss` while Gloss is running. Each run makes a dated folder holding the database (`gloss.dump`: every text, link, highlight, note, question, brief and reading place), the saved originals (`originals.tar.gz`), the library to read without Gloss (`library.zip`), and `RESTORE.txt`, which says how to put it back. A folder only gets its name once everything in it has been checked, so a half-finished backup never looks whole. Set `GLOSS_URL` if Gloss isn't at http://127.0.0.1:3100.
+
+**Export**, the round button beside **Add articles**, downloads the whole library to read without Gloss, on any deployment: every text as a Markdown file in a folder for its topic, with its brief and your highlights, notes and questions after it, your links in `Links.md`, and a `README.md` listing it all. It opens as it is in Obsidian or any text editor. Pictures are linked where they were published, not copied.
+
 ## Future Tasks
 
 - [ ] Ship it as a browser extension that opens the same margin on any page

@@ -3,10 +3,11 @@
 import { useUser } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, ViewTransition } from "react";
-import { ChevronLeft, ChevronRight, LayoutGrid, Library as LibraryIcon, Link2, Search, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, LayoutGrid, Library as LibraryIcon, Link2, LoaderCircle, Search, X } from "lucide-react";
 import { TopBar } from "@/components/ui/TopBar";
 import { readingMinutes, tidyTitle, wordCount } from "@/lib/article";
 import { forgetCover, paintAll } from "@/lib/covers";
+import { exportLibrary } from "@/lib/export";
 import { SAMPLE_SHELF } from "@/lib/classics";
 import { SORTS, sortBooks, TAGS, TOPIC, TOPICS, topicOf, type Book, type Sort, type TagKey, type Topic, type TopicKey } from "@/lib/library";
 import { keepAsLink } from "@/lib/keep-link";
@@ -367,7 +368,10 @@ export function Library() {
                   )}
                 </p>
               </div>
-              <AddButton onClick={() => setAdding("agent")} />
+              <div className="lib-hero-actions">
+                {hydrated && own.length + links.length > 0 && <ExportButton />}
+                <AddButton onClick={() => setAdding("agent")} />
+              </div>
             </div>
             {fromAgent.length > 0 && (
               <button type="button" className="lib-news" onClick={() => (setTag("agent"), setOnly(null), go({ view: "shelf" }))}>
@@ -620,6 +624,39 @@ function Chip({ on, color, onClick, children }: { on: boolean; color?: string; o
   return (
     <button type="button" aria-pressed={on} onClick={onClick} className="lib-chip" style={color ? { ["--c" as string]: color } : undefined}>
       {children}
+    </button>
+  );
+}
+
+/** The whole library as Markdown to read without Gloss, in a zip (lib/library-export.ts). */
+function ExportButton() {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  return (
+    <button
+      type="button"
+      className="lib-export"
+      aria-label="Export library"
+      aria-busy={busy || undefined}
+      data-tip={done ?? (busy ? "Exporting..." : "Export library")}
+      data-tip-hint={done || busy ? undefined : "Every text and link as Markdown, with your notes"}
+      onClick={async () => {
+        if (busy) return;
+        setBusy(true);
+        setDone(null);
+        try {
+          const r = await exportLibrary();
+          setDone(`Exported ${plural(r.texts, "text")}${r.links ? ` and ${plural(r.links, "link")}` : ""}${r.missing ? `; ${plural(r.missing, "text")} without its words` : ""}`);
+        } catch {
+          setDone("Couldn't export the library");
+        } finally {
+          setBusy(false);
+          setTimeout(() => setDone(null), 5000);
+        }
+      }}
+    >
+      {busy ? <LoaderCircle size={18} strokeWidth={2} className="animate-spin" /> : done ? <Check size={18} strokeWidth={2.2} className="text-good" /> : <Download size={18} strokeWidth={2} />}
     </button>
   );
 }

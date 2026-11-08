@@ -121,6 +121,12 @@ export async function articleDoc(userId: string, id: string): Promise<unknown | 
   return rows.length ? rows[0].doc : null;
 }
 
+/** Every text on a reader's shelf, with its words: for an export of the whole library. */
+export async function articleDocs(userId: string): Promise<Map<string, unknown>> {
+  const rows = await db().query("select id, doc from articles where user_id = $1 and not deleted and doc is not null", [userId]);
+  return new Map(rows.map((r) => [String(r.id), r.doc]));
+}
+
 /** One statement per table: unpack the JSON array of rows and upsert them all. An article pushed without its text keeps the stored one. */
 function upsert(table: Collection): string {
   const isArticles = table === "articles";

@@ -38,6 +38,47 @@
 
 /* ---------- adding: the button, with the agents that can do it for you ---------- */
 
+.lib-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* Exporting the library: a quiet round button beside Add articles. */
+.lib-export {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--rule-strong);
+  background: var(--bg-raised);
+  color: var(--ink-2);
+  animation: rise 0.6s 0.1s var(--ease-out) both;
+  transition: transform 0.16s var(--ease-out), border-color 0.25s ease, color 0.25s ease;
+}
+.lib-export:active {
+  transform: scale(0.95);
+}
+.lib-export[aria-busy] {
+  cursor: progress;
+}
+@media (hover: hover) and (pointer: fine) {
+  .lib-export:hover {
+    border-color: color-mix(in oklab, var(--ink) 26%, var(--rule-strong));
+    color: var(--ink);
+  }
+}
+@media (max-width: 639px) {
+  .lib-hero-actions {
+    width: 100%;
+  }
+  .lib-hero-actions .lib-add {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .lib-add {
   display: inline-flex;
   height: 56px;

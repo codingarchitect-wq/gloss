@@ -9,7 +9,7 @@ import { undash } from "@/lib/article";
 import { stopGloss } from "@/lib/ask";
 import { useGlosses, useHighlights, useStore, type Gloss, type Highlight, type Turn } from "@/lib/store";
 import { ACTIONS } from "@/lib/actions";
-import { notesMarkdown, pairsOf } from "@/lib/export";
+import { notesMarkdown, pairsOf } from "@/lib/markdown";
 import { Answer, Sources } from "./Answer";
 import { Writing } from "./Writing";
 import { useReader } from "./context";
