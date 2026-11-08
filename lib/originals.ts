@@ -2,11 +2,13 @@
  * Saved copies of the originals, for when the reader wants to see a text as it was published.
  * A page: everything it is made of (styles, pictures, fonts, scripts, video) packed into one HTML
  * file by monolith (github.com/Y2Z/monolith). A PDF link: the PDF itself. A YouTube video: the
- * video at 360p (lib/youtube.ts). Server-side only, and only where GLOSS_ORIGINALS_DIR is set;
- * pages also need monolith, videos yt-dlp (the Docker image has both).
+ * video at 360p (lib/youtube.ts). And a repo kept as a link card: its code, as a git bundle, in
+ * case it is taken down (lib/repo-copy.ts). Server-side only, and only where GLOSS_ORIGINALS_DIR
+ * is set; pages also need monolith, videos yt-dlp, repos git (the Docker image has all three).
  *
- * Copies are made in the background after an import, two at a time (and one video at a time
- * beside them), kept on disk as <dir>/<reader>/<article id>.html.gz (gzipped), .pdf or .mp4.
+ * Copies are made in the background after an import, two at a time (and one video or repo at a
+ * time beside them), kept on disk as <dir>/<reader>/<article id>.html.gz (gzipped), .pdf, .mp4
+ * or .bundle.
  * A page's copy is cut off from the internet when it is opened (monolith -I), so it works
  * offline and can't report back to anyone.
  *
@@ -25,7 +27,10 @@ import { createGzip } from "node:zlib";
 import { guardProxy, publicTarget } from "./guard-proxy";
 import { APP_UA } from "./llm";
 import { fetchArticle } from "./fetch-article";
-import { youtubeId } from "./article";
+import { originalKind, youtubeId } from "./article";
+import { articleSources } from "./db";
+import { gitReady, readRepoCopy, saveRepoCopy, type RepoCopy } from "./repo-copy";
+import { repoOf } from "./repo-url";
 import { downloadVideo, ytdlpReady } from "./youtube";
 
 const DIR = process.env.GLOSS_ORIGINALS_DIR?.trim() || "";
@@ -35,14 +40,14 @@ const MAX_RUN_MS = 240_000;
 const MAX_BYTES = 200_000_000;
 /** Less than this is an empty page: the document itself failed to load. */
 const MIN_BYTES = 512;
-/** At once: pages and PDFs, and beside them videos, which take minutes and shouldn't hold the rest up. */
-const LANES = { short: 2, video: 1 } as const;
+/** At once: pages and PDFs, and beside them videos and repos, which take minutes and shouldn't hold the rest up. */
+const LANES = { short: 2, long: 1 } as const;
 /** The largest video kept: two hours or so at 360p. */
 const MAX_VIDEO_BYTES = 2_000_000_000;
 const SAFE_ID = /^[\w.-]{1,160}$/;
 
-export type OriginalKind = "page" | "pdf" | "video";
-const EXT: Record<OriginalKind, string> = { page: ".html.gz", pdf: ".pdf", video: ".mp4" };
+export type OriginalKind = "page" | "pdf" | "video" | "repo";
+const EXT: Record<OriginalKind, string> = { page: ".html.gz", pdf: ".pdf", video: ".mp4", repo: ".bundle" };
 const KINDS = Object.keys(EXT) as OriginalKind[];
 
 /** Whether this server keeps copies: a directory to keep them in. */
@@ -90,6 +95,51 @@ export async function removeOriginal(userId: string, id: string): Promise<void> 
     const f = fileFor(userId, id, kind);
     if (f) await rm(f, { force: true });
   }
+  // A repo's copy keeps its record beside it, and sometimes an earlier copy.
+  const repo = fileFor(userId, id, "repo");
+  if (repo) for (const f of [`${repo}.prev`, repo.replace(/\.bundle$/, ".repo.json")]) await rm(f, { force: true });
+}
+
+/* ---------- repos ---------- */
+
+/** What is known about a repo's copy: made or not, its commit, whether the original is gone. Null when it was never tried. */
+export async function repoCopyInfo(userId: string, id: string): Promise<RepoCopy | null> {
+  const file = originalsEnabled() ? fileFor(userId, id, "repo") : null;
+  return file ? readRepoCopy(file) : null;
+}
+
+/** The earlier, larger copy of a repo, kept when its code shrank. */
+export async function previousRepoCopy(userId: string, id: string): Promise<Original | null> {
+  const file = originalsEnabled() ? fileFor(userId, id, "repo") : null;
+  if (!file) return null;
+  return stat(`${file}.prev`).then(
+    (s) => ({ kind: "repo" as const, size: s.size, path: `${file}.prev` }),
+    () => null
+  );
+}
+
+/** Whether a copy is on its way. */
+export const isSaving = (userId: string, id: string) => pending.has(`${userId}/${id}`);
+
+const HOUR = 3_600_000;
+const tended = new Map<string, number>();
+
+/**
+ * Keep a reader's repo copies current, at most once an hour: copy a repo card
+ * that has no copy yet (one that couldn't be copied is tried again the next
+ * day), and look again at a copy not looked at for a week. Called as the
+ * reader's library syncs, so it happens while Gloss is in use.
+ */
+export async function tendRepos(userId: string): Promise<void> {
+  if (!originalsEnabled() || !gitReady() || Date.now() - (tended.get(userId) ?? 0) < HOUR) return;
+  tended.set(userId, Date.now());
+  for (const a of await articleSources(userId)) {
+    if (originalKind({ kind: a.kind, origin: a.origin, sourceUrl: a.url }) !== "repo") continue;
+    const info = await repoCopyInfo(userId, a.id);
+    const age = info ? Date.now() - Date.parse(info.checkedAt) : Infinity;
+    const has = Boolean(await findOriginal(userId, a.id));
+    if (age > (has ? 7 * 24 : 24) * HOUR) queueOriginal(userId, a.id, a.url, "repo");
+  }
 }
 
 /* ---------- making a copy ---------- */
@@ -136,18 +186,19 @@ function withStandIns(page: Buffer, url: string): Buffer[] {
 type Job = { userId: string; id: string; url: string; kind: OriginalKind };
 const queue: Job[] = [];
 const pending = new Set<string>();
-const running = { short: 0, video: 0 };
-const laneOf = (kind: OriginalKind) => (kind === "video" ? "video" : "short");
+const running = { short: 0, long: 0 };
+const laneOf = (kind: OriginalKind) => (kind === "video" || kind === "repo" ? "long" : "short");
 
 /**
- * Save a copy of the page an article came from, its PDF or its video, in the background. False when
- * this server can't (copies are off, or no monolith for a page, no yt-dlp for a video); true once it
- * is on its way.
+ * Save a copy of the page an article came from, its PDF, its video, or a card's repo, in the
+ * background. False when this server can't (copies are off, or no monolith for a page, no yt-dlp
+ * for a video, no git for a repo); true once it is on its way.
  */
 export function queueOriginal(userId: string, id: string, url: string | undefined, kind: OriginalKind = "page"): boolean {
   if (!url || !/^https?:\/\//i.test(url) || !originalsEnabled() || !fileFor(userId, id, kind)) return false;
   if (kind === "page" && !canCopyPages()) return false;
   if (kind === "video" && (!youtubeId(url) || !ytdlpReady())) return false;
+  if (kind === "repo" && (!repoOf(url) || !gitReady())) return false;
   const key = `${userId}/${id}`;
   if (pending.has(key)) return true;
   pending.add(key);
@@ -166,7 +217,7 @@ function drain() {
     }
     queue.splice(i, 1);
     running[lane]++;
-    void (job.kind === "pdf" ? savePdf(job) : job.kind === "video" ? saveVideo(job) : save(job))
+    void (job.kind === "pdf" ? savePdf(job) : job.kind === "video" ? saveVideo(job) : job.kind === "repo" ? saveRepo(job) : save(job))
       .catch((e) => console.error(`originals: could not save ${job.url}:`, e instanceof Error ? e.message : e))
       .finally(() => {
         running[lane]--;
@@ -261,4 +312,12 @@ async function saveVideo({ userId, id, url }: Job) {
     await rm(part, { force: true });
     await rm(`${part}.part`, { force: true });
   }
+}
+
+/** A repo kept as a link card: its latest code, as a git bundle (lib/repo-copy.ts). */
+async function saveRepo({ userId, id, url }: Job) {
+  await mkdir(join(DIR, userId), { recursive: true });
+  const started = Date.now();
+  const r = await saveRepoCopy(url, fileFor(userId, id, "repo")!);
+  if (r.saved) console.info(`originals: saved ${url} (${Math.round((r.size ?? 0) / 1e5) / 10} MB repo, ${Math.round((Date.now() - started) / 1000)} s)`);
 }

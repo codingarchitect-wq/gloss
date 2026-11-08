@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth-server";
 import { isCollection, pullRows, pushRows, type Collection, type PushRow } from "@/lib/db";
 import { originalKind } from "@/lib/article";
-import { findOriginal, originalsEnabled, queueOriginal, removeOriginal } from "@/lib/originals";
+import { findOriginal, originalsEnabled, queueOriginal, removeOriginal, tendRepos } from "@/lib/originals";
 
 export const runtime = "nodejs";
 
@@ -23,6 +23,8 @@ export async function GET(req: Request) {
   if (!process.env.DATABASE_URL) return Response.json({ error: "There is no database on this server." }, { status: 503 });
   const raw = new URL(req.url).searchParams.get("since");
   const since = raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : "1970-01-01T00:00:00Z";
+  // While the library is in use, its repo copies are kept current (at most once an hour; lib/originals.ts).
+  void tendRepos(userId).catch((e) => console.error("originals: could not tend repos:", e instanceof Error ? e.message : e));
   return Response.json(await pullRows(userId, since));
 }
 

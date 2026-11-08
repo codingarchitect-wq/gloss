@@ -52,9 +52,10 @@ COPY --from=monolith --chmod=755 /monolith /usr/local/bin/monolith
 COPY --from=ytdlp --chmod=755 /yt-dlp /usr/local/bin/yt-dlp
 COPY --from=denoland/deno:bin-2.9.8@sha256:b507583d3c68ba69f3ed2ce5969ae5b8b70f43421c781279c7aea06435263543 /deno /usr/local/bin/deno
 # monolith won't start without the system's CA certificates, which the slim image leaves out.
+# git copies the repos kept as link cards (lib/repo-copy.ts).
 # Saved copies live in /data/originals. The ids are the ones earlier (Alpine) images used, so the
 # copies already in the volume stay this user's.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 101 gloss && useradd --system --uid 100 --gid gloss --no-create-home gloss \
     && mkdir -p /data/originals && chown gloss:gloss /data/originals
 COPY --from=build --chown=gloss:gloss /app/.next/standalone ./

@@ -139,16 +139,16 @@ function upsert(table: Collection): string {
       }`;
 }
 
-/** Where an article came from: its page and how it was added. */
-export async function articleSource(userId: string, id: string): Promise<{ url?: string; origin?: string } | null> {
-  const rows = await db().query("select data->>'sourceUrl' as url, data->>'origin' as origin from articles where user_id = $1 and id = $2 and not deleted", [userId, id]);
-  return rows.length ? { url: rows[0].url ?? undefined, origin: rows[0].origin ?? undefined } : null;
+/** Where an article came from: its page, how it was added, and whether it is a link card. */
+export async function articleSource(userId: string, id: string): Promise<{ url?: string; origin?: string; kind?: string } | null> {
+  const rows = await db().query("select data->>'sourceUrl' as url, data->>'origin' as origin, data->>'kind' as kind from articles where user_id = $1 and id = $2 and not deleted", [userId, id]);
+  return rows.length ? { url: rows[0].url ?? undefined, origin: rows[0].origin ?? undefined, kind: rows[0].kind ?? undefined } : null;
 }
 
-/** Every article on a reader's shelf, with its page and how it was added. */
-export async function articleSources(userId: string): Promise<{ id: string; url?: string; origin?: string }[]> {
-  const rows = await db().query("select id, data->>'sourceUrl' as url, data->>'origin' as origin from articles where user_id = $1 and not deleted", [userId]);
-  return rows.map((r) => ({ id: String(r.id), url: r.url ?? undefined, origin: r.origin ?? undefined }));
+/** Every article on a reader's shelf, with its page, how it was added, and whether it is a link card. */
+export async function articleSources(userId: string): Promise<{ id: string; url?: string; origin?: string; kind?: string }[]> {
+  const rows = await db().query("select id, data->>'sourceUrl' as url, data->>'origin' as origin, data->>'kind' as kind from articles where user_id = $1 and not deleted", [userId]);
+  return rows.map((r) => ({ id: String(r.id), url: r.url ?? undefined, origin: r.origin ?? undefined, kind: r.kind ?? undefined }));
 }
 
 /* ---------- painted covers ---------- */

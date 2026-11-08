@@ -2669,6 +2669,68 @@ button.starter-card:active {
 .link-panel-text:disabled {
   opacity: 0.6;
 }
+/* A repo's saved code: a line under the note, with its download. */
+.link-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+}
+.link-copy-icon {
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+.link-copy-text {
+  min-width: 0;
+  flex: 1;
+}
+.link-copy-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.link-copy-sub {
+  margin-top: 1px;
+  text-wrap: pretty;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ink-3);
+}
+.link-copy-sub a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-copy[data-gone] {
+  border-color: var(--rubric-line);
+}
+.link-copy[data-gone] .link-copy-icon,
+.link-copy[data-gone] .link-copy-title {
+  color: var(--rubric-text);
+}
+.link-copy-btn {
+  display: inline-flex;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-strong);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  transition: background-color 0.2s ease, transform 0.15s var(--ease-out);
+}
+.link-copy-btn:hover {
+  background: var(--bg-sunk);
+}
+.link-copy-btn:active {
+  transform: scale(0.97);
+}
 .link-panel-foot {
   margin-top: 12px;
   text-align: center;

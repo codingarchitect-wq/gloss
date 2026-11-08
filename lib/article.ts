@@ -1,5 +1,6 @@
 /** The document model. Shared by server (import) and client (reader). */
 
+import { repoOf } from "./repo-url";
 import { texToText } from "./tex";
 
 export type Run = { text: string; em?: boolean; strong?: boolean; code?: boolean; href?: string };
@@ -95,12 +96,13 @@ export function clock(sec: number): string {
 
 /**
  * The original a server can keep for a text (lib/originals.ts): a copy of the page it came from,
- * the PDF behind a PDF link, or a YouTube video. Null for pasted text, dropped files, the bundled shelf,
- * and links kept as cards, which have no text to keep a copy of.
+ * the PDF behind a PDF link, or a YouTube video; and for a link kept as a card, the code of the repo
+ * it links to. Null for pasted text, dropped files, the bundled shelf, and any other card, which
+ * has no text to keep a copy of.
  */
-export function originalKind(a: { origin?: unknown; sourceUrl?: unknown; kind?: unknown }): "page" | "pdf" | "video" | null {
-  if (a.kind === "link") return null;
+export function originalKind(a: { origin?: unknown; sourceUrl?: unknown; kind?: unknown }): "page" | "pdf" | "video" | "repo" | null {
   if (typeof a.sourceUrl !== "string" || !/^https?:\/\//i.test(a.sourceUrl)) return null;
+  if (a.kind === "link") return repoOf(a.sourceUrl) ? "repo" : null;
   if (a.origin === "url") return youtubeId(a.sourceUrl) ? "video" : "page";
   return a.origin === "file" ? "pdf" : null;
 }

@@ -1,6 +1,7 @@
 /** Links, shared by browser and server. */
 
 import { slugify } from "./article";
+import { GITHUB_PAGES } from "./repo-url";
 
 /** The same link, written the same way: no fragment, no tracking parameters, no trailing slash. */
 export function normalizeUrl(raw: string): string {
@@ -104,7 +105,7 @@ export function githubRepo(raw: string): { owner: string; repo: string } | null 
   if (!u || u.hostname.replace(/^www\./, "") !== "github.com") return null;
   const [owner, repo] = u.pathname.split("/").filter(Boolean);
   // Pages of GitHub's own, not anybody's repo.
-  if (!owner || !repo || /^(orgs|users|topics|collections|features|marketplace|sponsors|settings|explore|trending|search|login|about|pricing|enterprise|apps|site|security|customer-stories|readme|events)$/i.test(owner)) return null;
+  if (!owner || !repo || GITHUB_PAGES.test(owner)) return null;
   return { owner, repo: repo.replace(/\.git$/, "") };
 }
 

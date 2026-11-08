@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 import { auth } from "@/lib/auth-server";
 import { originalKind } from "@/lib/article";
 import { articleSource } from "@/lib/db";
-import { MAX_PDF_BYTES, findOriginal, openOriginal, originalsEnabled, queueOriginal, storePdf } from "@/lib/originals";
+import { MAX_PDF_BYTES, findOriginal, isSaving, openOriginal, originalsEnabled, previousRepoCopy, queueOriginal, repoCopyInfo, storePdf } from "@/lib/originals";
 
 export const runtime = "nodejs";
 
@@ -34,6 +34,9 @@ const PDF_HEADERS = { ...COMMON, "Content-Type": "application/pdf", "Content-Sec
 /** A video plays in the reader, and opens on its own sandboxed like the rest. */
 const VIDEO_HEADERS = { ...COMMON, "Content-Type": "video/mp4", "Content-Security-Policy": "sandbox" };
 
+/** A repo's copy is a git bundle, to download and `git clone`. */
+const REPO_HEADERS = { ...COMMON, "Content-Type": "application/octet-stream", "Content-Security-Policy": "sandbox" };
+
 /**
  * The bytes a Range header asks for (one range, as players and PDF viewers send it), so a video can
  * be played from anywhere in it. Undefined for the whole file, null for a range past the end.
@@ -54,13 +57,27 @@ async function who(): Promise<string | Response> {
   return userId ?? new Response(null, { status: 401 });
 }
 
-/** The copy of the page, PDF or video this text came from, as it was saved. */
+/**
+ * The copy of the page, PDF or video this text came from, or of a card's repo, as it was saved.
+ * `?info`: what is known about a repo's copy, for its card. `?previous`: a repo's earlier, larger copy.
+ */
 export async function GET(req: Request, { params }: Ctx) {
   const userId = await who();
   if (userId instanceof Response) return userId;
   const id = (await params).id;
-  const copy = await findOriginal(userId, id);
+  const q = new URL(req.url).searchParams;
+  if (q.has("info")) {
+    const [info, copy, prev] = await Promise.all([repoCopyInfo(userId, id), findOriginal(userId, id), previousRepoCopy(userId, id)]);
+    return Response.json({ info, saved: copy?.kind === "repo", saving: isSaving(userId, id), previous: Boolean(prev) }, { headers: { "Cache-Control": "no-store" } });
+  }
+  const copy = q.has("previous") ? await previousRepoCopy(userId, id) : await findOriginal(userId, id);
   if (!copy) return Response.json({ error: "No saved copy of this text." }, { status: 404 });
+  if (copy.kind === "repo") {
+    const name = (await repoCopyInfo(userId, id))?.name.split("/").pop()?.replace(/[^\w.-]/g, "_") || id;
+    return new Response(Readable.toWeb(openOriginal(copy)) as ReadableStream, {
+      headers: { ...REPO_HEADERS, "Content-Length": String(copy.size), "Content-Disposition": `attachment; filename="${name}${q.has("previous") ? ".previous" : ""}.bundle"` },
+    });
+  }
   if (copy.kind === "page") {
     return new Response(Readable.toWeb(openOriginal(copy)) as ReadableStream, { headers: { ...PAGE_HEADERS, "Content-Length": String(copy.size) } });
   }
@@ -83,15 +100,15 @@ export async function HEAD(_req: Request, { params }: Ctx) {
   return new Response(null, { status: (await findOriginal(userId, (await params).id)) ? 200 : 404 });
 }
 
-/** Save (or save again) a copy of the page, PDF or video this text came from. */
+/** Save (or save again) a copy of the page, PDF or video this text came from, or of a card's repo. */
 export async function POST(_req: Request, { params }: Ctx) {
   const userId = await who();
   if (userId instanceof Response) return userId;
   const id = (await params).id;
   const src = await articleSource(userId, id);
-  const kind = src ? originalKind({ origin: src.origin, sourceUrl: src.url }) : null;
-  if (!kind) return Response.json({ error: "This text has no page, PDF or video to save." }, { status: 404 });
-  if (!queueOriginal(userId, id, src!.url, kind)) return Response.json({ error: `This server can't save ${kind === "video" ? "videos" : "copies of pages"}.` }, { status: 501 });
+  const kind = src ? originalKind({ origin: src.origin, sourceUrl: src.url, kind: src.kind }) : null;
+  if (!kind) return Response.json({ error: "This text has no page, PDF, video or repo to save." }, { status: 404 });
+  if (!queueOriginal(userId, id, src!.url, kind)) return Response.json({ error: `This server can't save ${kind === "video" ? "videos" : kind === "repo" ? "repos" : "copies of pages"}.` }, { status: 501 });
   return Response.json({ queued: true }, { status: 202 });
 }
 

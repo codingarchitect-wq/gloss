@@ -371,6 +371,8 @@ async function keepLinkFor(userId: string, url: string, via: string, note?: stri
   };
   for (const k of Object.keys(item) as (keyof LibraryItem)[]) if (item[k] === undefined) delete item[k];
   await shelveForUser(userId, item, null);
+  // A repo's code is kept too, in case it is taken down.
+  if (originalKind(item) === "repo") queueOriginal(userId, item.id, item.sourceUrl, "repo");
   return { url, status: "saved", kind: "link", title: l.title, topic: TOPIC[topic ?? "unsorted"].name };
 }
 

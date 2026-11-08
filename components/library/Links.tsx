@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, ArrowUpRight, BookOpen, ChevronDown, Globe, Link2, Loader2, PencilLine, RotateCw, Star, Trash2, X } from "lucide-react";
+import { Archive, ArrowRight, ArrowUpRight, BookOpen, ChevronDown, Download, Globe, Link2, Loader2, PencilLine, RotateCw, Star, Trash2, X } from "lucide-react";
 import { looksLikeUrl } from "@/lib/import";
 import { keepLink, readAsText, refreshLink } from "@/lib/keep-link";
 import { TOPIC, TOPICS, topicOf, type TopicKey } from "@/lib/library";
 import { fmtCount, isLink, normalizeUrl } from "@/lib/links";
+import type { RepoCopy } from "@/lib/repo-copy";
+import { repoOf } from "@/lib/repo-url";
 import { useStore, type LibraryItem } from "@/lib/store";
 import { Glyph } from "./Book";
 
@@ -423,6 +425,8 @@ export function LinkPanel({ link, onClose, onRead }: { link: LibraryItem; onClos
             <NoteField key={link.note ?? ""} note={link.note ?? ""} onDone={(note) => note !== (link.note ?? "") && shelve(link.id, { note: note || undefined })} />
           </label>
 
+          {repoOf(link.sourceUrl ?? "") && <RepoCopyRow link={link} />}
+
           {error && <p className="mt-3 text-[12.5px] text-rubric-text">{error}</p>}
           <div className="link-panel-actions">
             <a className="ob-read" href={link.sourceUrl} target="_blank" rel="noopener noreferrer">
@@ -438,6 +442,96 @@ export function LinkPanel({ link, onClose, onRead }: { link: LibraryItem; onClos
       </section>
     </div>,
     document.body
+  );
+}
+
+type RepoState = { info: RepoCopy | null; saved: boolean; saving: boolean; previous: boolean };
+
+const day = (iso?: string) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "");
+const mb = (n?: number) => (n ? `${n < 1e6 ? "<1" : (n / 1e6).toFixed(n < 1e7 ? 1 : 0)} MB` : "");
+
+/**
+ * A repo's code, kept on the machine Gloss runs on in case the repo is taken
+ * down: the latest commit of its main branch, as a git bundle (lib/repo-copy.ts).
+ * Nothing shows where the server keeps no copies.
+ */
+function RepoCopyRow({ link }: { link: LibraryItem }) {
+  const url = `/api/originals/${encodeURIComponent(link.id)}`;
+  const [s, setS] = useState<RepoState | "off" | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let live = true;
+    fetch(`${url}?info`)
+      .then(async (r) => live && setS(r.ok ? ((await r.json()) as RepoState) : "off"))
+      .catch(() => live && setS("off"));
+    return () => {
+      live = false;
+    };
+  }, [url, tick]);
+
+  // A card kept a moment ago has its copy on the way; while one is, look again every few seconds.
+  const saving = s !== null && s !== "off" && !s.saved && (s.saving || (!s.info && Date.now() - link.addedAt < 10 * 60_000));
+  useEffect(() => {
+    if (!saving) return;
+    const t = setTimeout(() => setTick((n) => n + 1), 4000);
+    return () => clearTimeout(t);
+  }, [saving, tick]);
+
+  if (!s || s === "off") return null;
+  const i = s.info;
+  const save = async () => {
+    setS({ ...s, saving: true });
+    await fetch(url, { method: "POST" }).catch(() => null);
+    setTick((n) => n + 1);
+  };
+
+  if (s.saved && i) {
+    const host = i.name.split("/")[0];
+    const what = `${i.branch} at ${i.commit?.slice(0, 7)}, ${day(i.committedAt)}`;
+    return (
+      <div className="link-copy" data-gone={i.goneSince ? "" : undefined}>
+        <Archive size={17} className="link-copy-icon" aria-hidden />
+        <div className="link-copy-text">
+          <p className="link-copy-title">{i.goneSince ? `Gone from ${host}. Your copy stays` : "Code saved"}</p>
+          <p className="link-copy-sub" title={`Looked at ${day(i.checkedAt)}${i.subject ? `. Its last commit: ${i.subject}` : ""}`}>
+            {i.goneSince ? `Missing since ${day(i.goneSince)} · copy of ${what}` : `${what} · ${mb(i.size)}`}
+            {s.previous && (
+              <>
+                {" · "}
+                <a href={`${url}?previous`} download data-tip="Kept when the code shrank by half or more">
+                  earlier copy
+                </a>
+              </>
+            )}
+          </p>
+        </div>
+        <a className="link-copy-btn" href={url} download data-tip="A git bundle" data-tip-hint="git clone it to get the repo back">
+          <Download size={14} aria-hidden /> Download
+        </a>
+      </div>
+    );
+  }
+  if (saving)
+    return (
+      <div className="link-copy">
+        <Loader2 size={17} className="link-copy-icon animate-spin" aria-hidden />
+        <div className="link-copy-text">
+          <p className="link-copy-title">Saving the code</p>
+          <p className="link-copy-sub">Its main branch as it is now, in case the repo is taken down</p>
+        </div>
+      </div>
+    );
+  return (
+    <div className="link-copy">
+      <Archive size={17} className="link-copy-icon" aria-hidden />
+      <div className="link-copy-text">
+        <p className="link-copy-title">{i?.error ? "Couldn't save the code" : "Keep a copy of the code"}</p>
+        <p className="link-copy-sub">{i?.error ?? "Its main branch as it is now, in case the repo is taken down"}</p>
+      </div>
+      <button type="button" className="link-copy-btn" onClick={save}>
+        {i?.error ? "Try again" : "Save"}
+      </button>
+    </div>
   );
 }
 
