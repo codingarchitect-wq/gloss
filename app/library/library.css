@@ -2223,6 +2223,7 @@ button.starter-card:active {
   z-index: 1;
   border-radius: inherit;
   outline: none;
+  cursor: pointer;
 }
 .link-hit:focus-visible {
   outline: 2px solid var(--rubric);
@@ -2323,6 +2324,25 @@ button.starter-card:active {
   color: var(--ink);
   overflow-wrap: anywhere;
 }
+/* The title is the link, above the button that fills the card and pulls it out. */
+.link-title a {
+  position: relative;
+  z-index: 2;
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, var(--ink) 22%, transparent);
+  transition: text-decoration-color 0.2s ease;
+  outline: none;
+}
+.link-title a:hover {
+  text-decoration-color: var(--c, var(--ink));
+}
+/* The title clips its overflow, so focus shows on the underline rather than as an outline. */
+.link-title a:focus-visible {
+  text-decoration-color: var(--rubric);
+  text-decoration-thickness: 2px;
+}
 /* A catalogue card's red rule, under its heading. */
 .link-rule {
   display: block;
@@ -2378,32 +2398,6 @@ button.starter-card:active {
   height: 9px;
   border-radius: 999px;
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1);
-}
-
-.link-tools {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  z-index: 2;
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.link-tools .ob-icon {
-  background: var(--bg-raised);
-}
-.link-tools .ob-icon:hover {
-  background: var(--bg-sunk);
-}
-.link-card:hover .link-tools,
-.link-card:focus-within .link-tools {
-  opacity: 1;
-}
-@media (hover: none) {
-  .link-tools {
-    opacity: 1;
-  }
 }
 
 .link-card[data-compact] .link-thumb {

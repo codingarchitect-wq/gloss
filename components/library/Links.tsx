@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArrowRight, ArrowUpRight, BookOpen, ChevronDown, Download, Globe, Link2, Loader2, PencilLine, RotateCw, Star, Trash2, X } from "lucide-react";
+import { Archive, ArrowRight, ArrowUpRight, BookOpen, ChevronDown, Download, Globe, Link2, Loader2, RotateCw, Star, Trash2, X } from "lucide-react";
 import { looksLikeUrl } from "@/lib/import";
 import { keepLink, readAsText, refreshLink } from "@/lib/keep-link";
 import { TOPIC, TOPICS, topicOf, type TopicKey } from "@/lib/library";
@@ -16,8 +16,8 @@ import { Glyph } from "./Book";
  * The library's card catalogue: links kept to find again rather than to read
  * (a repo, a tool, a site), each on an index card with the picture it shares
  * itself with. They live in a drawer beside the shelves, so the shelves stay
- * for reading. A card opens its link; its pencil pulls it out to write a note,
- * move it to another topic, or read the page in as a text after all.
+ * for reading. A card's title opens its link; anywhere else on it pulls it out,
+ * to write a note, move it to another topic, or read the page in as a text.
  */
 
 export type LinkSort = "recent" | "topic" | "az";
@@ -116,14 +116,19 @@ export function LinkCard({ link, i = 0, fresh, compact, onOpen }: { link: Librar
       data-compact={compact || undefined}
       style={{ ["--c" as string]: t.shades[0], ["--c-deep" as string]: t.shades[2], ["--i" as string]: i }}
     >
-      <a className="link-hit" href={link.sourceUrl} target="_blank" rel="noopener noreferrer" aria-label={`${link.title}, ${host} (opens in a new tab)`} />
+      {/* The whole card pulls it out; only its title goes to the link. */}
+      <button type="button" className="link-hit" aria-label={`Open the card for ${link.title}`} onClick={() => onOpen(link)} />
       <Picture link={link} />
       <div className="link-body">
         <p className="link-site">
           <Favicon src={link.icon} />
           <span className="truncate">{host}</span>
         </p>
-        <h3 className="link-title">{link.title}</h3>
+        <h3 className="link-title">
+          <a href={link.sourceUrl} target="_blank" rel="noopener noreferrer" aria-label={`${link.title}, on ${host} (opens in a new tab)`}>
+            {link.title}
+          </a>
+        </h3>
         <span className="link-rule" aria-hidden />
         {!compact && link.dek && <p className="link-dek">{link.dek}</p>}
         {!compact && link.note && <p className="link-note">{link.note}</p>}
@@ -134,11 +139,6 @@ export function LinkCard({ link, i = 0, fresh, compact, onOpen }: { link: Librar
           <Facts link={link} />
           {link.favorite && <span aria-label="Favourite">⭐</span>}
         </p>
-      </div>
-      <div className="link-tools">
-        <button type="button" className="ob-icon" aria-label={`Edit the card for ${link.title}`} data-tip="Note, topic, more" onClick={() => onOpen(link)}>
-          <PencilLine size={14} />
-        </button>
       </div>
     </article>
   );
