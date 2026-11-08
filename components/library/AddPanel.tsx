@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BookOpen, BookmarkPlus, Check, Copy, Loader2, Plus, Trash2, X } from "lucide-react";
 import { importFromUrl, keep, looksLikeUrl } from "@/lib/import";
-import { normalizeUrl } from "@/lib/links";
+import { keepLink } from "@/lib/keep-link";
+import { looksLikeLink, normalizeUrl } from "@/lib/links";
 import { useStore } from "@/lib/store";
 import { Mark, MarkStack, type AgentMark } from "./AgentMarks";
 import { Glyph } from "./Book";
@@ -81,7 +82,16 @@ export function AddButton({ onClick, compact }: { onClick: () => void; compact?:
 
 /* ---------- links ---------- */
 
-type Row = { url: string; state: "waiting" | "reading" | "saved" | "already" | "failed"; title?: string; error?: string };
+/** `linked`: kept as a card in the Links drawer rather than read onto the shelf. */
+type Row = { url: string; state: "waiting" | "reading" | "saved" | "linked" | "already" | "failed"; title?: string; error?: string };
+
+/** How a link is saved: as the library sees fit (a repo, a tool or a site's home page is a card), as a text to read, or as a card. */
+type SaveAs = "auto" | "text" | "link";
+const SAVE_AS: { key: SaveAs; label: string; tip: string }[] = [
+  { key: "auto", label: "Auto", tip: "Articles go on the shelf; repos, tools and sites go in Links" },
+  { key: "text", label: "Texts", tip: "Read every link onto the shelf" },
+  { key: "link", label: "Links", tip: "Keep every link as a card in Links" },
+];
 
 /** How many links one Save reads in. A Pocket export can hold thousands; the rest wait in the box for the next Save. */
 const BATCH = 100;
@@ -98,6 +108,7 @@ function Links() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  const [saveAs, setSaveAs] = useState<SaveAs>("auto");
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => ref.current?.focus(), []);
@@ -133,7 +144,20 @@ function Links() {
     const next = async () => {
       for (let x = todo.shift(); x; x = todo.shift()) {
         set(x.i, { state: "reading" });
+        const card = async (error?: string) => {
+          const k = await keepLink(x!.r.url);
+          set(x!.i, k.ok ? { state: "linked", title: k.title } : { state: "failed", error: error ?? k.error, title: undefined });
+        };
+        if (saveAs === "link" || (saveAs === "auto" && looksLikeLink(x.r.url))) {
+          await card();
+          continue;
+        }
         const r = await importFromUrl(x.r.url, (_, label) => label && set(x!.i, { title: label }));
+        // A page with no article on it (an app, a product page) is still worth keeping, as a card.
+        if (!r.ok && r.notArticle && saveAs === "auto") {
+          await card(r.error);
+          continue;
+        }
         const err = r.ok ? await keep(r.article, r.file) : r.error;
         set(x.i, err ? { state: "failed", error: err, title: undefined } : { state: "saved", title: r.ok ? r.article.title : undefined });
       }
@@ -147,7 +171,7 @@ function Links() {
     <div className="mt-5">
       <p className="text-[19px] font-serif leading-tight text-ink">Save links to your library</p>
       <p className="mt-1 text-[13px] text-ink-3">
-        One or many, a line each. Gloss reads each page in and sorts it onto a topic. PDFs work too. Leaving Pocket, Instapaper or Raindrop?{" "}
+        One or many, a line each. Gloss reads each article in and sorts it onto a topic; repos, tools and sites become cards in Links. PDFs work too. Leaving Pocket, Instapaper or Raindrop?{" "}
         <button type="button" onClick={() => fileRef.current?.click()} className="text-ink-2 underline decoration-rule-strong underline-offset-2 hover:text-ink">
           Drop its export here
         </button>
@@ -195,10 +219,19 @@ function Links() {
       />
       <div className="mt-3 flex items-center justify-between gap-3">
         <span className="text-[12.5px] text-ink-4">{urls.length ? `${urls.length} link${urls.length === 1 ? "" : "s"}` : text.trim() ? "No links found yet" : ""}</span>
-        <button type="button" onClick={save} disabled={!urls.length || busy} className="add-btn">
-          {busy && <Loader2 size={14} className="animate-spin" />}
-          {busy ? "Saving" : urls.length > 1 ? `Save ${Math.min(urls.length, BATCH)}` : "Save"}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="lib-sort !ml-0" role="radiogroup" aria-label="Save as">
+            {SAVE_AS.map((o) => (
+              <button key={o.key} type="button" role="radio" aria-checked={saveAs === o.key} data-tip={o.tip} disabled={busy} onClick={() => setSaveAs(o.key)}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={save} disabled={!urls.length || busy} className="add-btn">
+            {busy && <Loader2 size={14} className="animate-spin" />}
+            {busy ? "Saving" : urls.length > 1 ? `Save ${Math.min(urls.length, BATCH)}` : "Save"}
+          </button>
+        </div>
       </div>
       {note && <p className="mt-2 text-[12.5px] text-ink-3">{note}</p>}
       {rows.length > 0 && (
@@ -206,12 +239,12 @@ function Links() {
           {rows.map((r) => (
             <li key={r.url} data-state={r.state}>
               <span className="add-dot" aria-hidden>
-                {r.state === "reading" ? <Loader2 size={13} className="animate-spin" /> : r.state === "saved" || r.state === "already" ? <Check size={13} /> : r.state === "failed" ? <X size={13} /> : null}
+                {r.state === "reading" ? <Loader2 size={13} className="animate-spin" /> : r.state === "saved" || r.state === "linked" || r.state === "already" ? <Check size={13} /> : r.state === "failed" ? <X size={13} /> : null}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13.5px] text-ink">{r.title ?? r.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
                 <span className="block truncate text-[12px] text-ink-3">
-                  {r.state === "saved" ? "On the shelf" : r.state === "already" ? "Already in your library" : r.state === "failed" ? r.error : r.state === "reading" ? "Reading" : "Waiting"}
+                  {r.state === "saved" ? "On the shelf" : r.state === "linked" ? "Kept in Links" : r.state === "already" ? "Already in your library" : r.state === "failed" ? r.error : r.state === "reading" ? "Reading" : "Waiting"}
                 </span>
               </span>
             </li>

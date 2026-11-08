@@ -4,8 +4,11 @@ import { textToArticle, wordCount, type Article } from "./article";
 import { shelveText } from "./shelving";
 import { savePdf, saveDoc, useStore, type LibraryItem } from "./store";
 
-/** `needKey`: the import needs the reader's own OpenRouter key (a long PDF, or free use spent). `file`: the original, kept with a PDF. */
-export type ImportResult = { ok: true; article: Article; file?: Blob } | { ok: false; error: string; needKey?: boolean };
+/**
+ * `needKey`: the import needs the reader's own OpenRouter key (a long PDF, or free use spent). `file`: the original, kept with a PDF.
+ * `notArticle`: the page holds no article to read, so it may be kept as a link instead (lib/keep-link.ts).
+ */
+export type ImportResult = { ok: true; article: Article; file?: Blob } | { ok: false; error: string; needKey?: boolean; notArticle?: boolean };
 
 /** A link to a PDF is fetched by the server and read here, as if the file had been dropped. */
 export async function importFromUrl(raw: string, onProgress?: (p: number, label?: string) => void): Promise<ImportResult> {
@@ -17,8 +20,8 @@ export async function importFromUrl(raw: string, onProgress?: (p: number, label?
       if (r.ok) r.article.sourceUrl ??= raw.trim();
       return r;
     }
-    const j = (await res.json()) as { article?: Article; error?: string };
-    return j.article ? { ok: true, article: j.article } : { ok: false, error: j.error ?? "Could not import that page." };
+    const j = (await res.json()) as { article?: Article; error?: string; notArticle?: boolean };
+    return j.article ? { ok: true, article: j.article } : { ok: false, error: j.error ?? "Could not import that page.", notArticle: j.notArticle };
   } catch {
     return { ok: false, error: "Could not reach the importer. Check your connection." };
   }

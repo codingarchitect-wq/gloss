@@ -9,10 +9,11 @@
  */
 
 import { hashToken, looksLikeToken } from "./agent";
-import { normalizeUrl } from "./links";
+import { linkId, looksLikeLink, normalizeUrl } from "./links";
 import { blockText, originalKind, textToArticle, wordCount, youtubeId, type Article } from "./article";
 import { shelfOf, shelveForUser, tokenUser, type ShelfRow } from "./db";
 import { arxivFullText, fetchArticle, notAnArticle } from "./fetch-article";
+import { fetchLink } from "./fetch-link";
 import { TOPIC, TOPICS, isTopic, yearOf, type TopicKey } from "./library";
 import { chargeFree, checkFreeUser } from "./quota";
 import { allow } from "./ratelimit";
@@ -32,7 +33,8 @@ const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://usegloss.io";
 const INSTRUCTIONS = `Gloss is a reader. This server is the reader's own library in Gloss: save articles to it, and look through what is there.
 When saving from social posts or bookmarks, send the URL of the article, essay or paper itself (the link inside the post), not the post. Gloss reads each page in, sorts it onto a topic, and it appears on the reader's shelves the next time they open Gloss.
 Gloss can't fetch posts on X and other social sites, or pages behind a login. When the post itself is the piece (an X Article, a long post, a thread), read it yourself and send the full text with save_text.
-A YouTube link can be saved as it is: Gloss reads the video's captions as its text and keeps the video. Other videos, and YouTube where saving one fails, need their transcript sent with save_text.`;
+A YouTube link can be saved as it is: Gloss reads the video's captions as its text and keeps the video. Other videos, and YouTube where saving one fails, need their transcript sent with save_text.
+Links to keep rather than read (code repositories, packages, models, tools, products, a site's home page) go to the library's Links drawer as cards, with their picture and description: send them with save_links. save_articles sends such links there too.`;
 
 const TOOLS = [
   {
@@ -43,6 +45,33 @@ const TOOLS = [
       type: "object",
       properties: { urls: { type: "array", items: { type: "string" }, minItems: 1, maxItems: PER_CALL, description: "Article URLs to save." } },
       required: ["urls"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "save_links",
+    title: "Keep links in the library",
+    description: `Keep links the reader wants to find again rather than read: code repositories, packages, models, datasets, tools, products, sites. Gloss keeps each as a card in the library's Links drawer, with the page's picture, description and site icon (and a GitHub repo's stars and language), sorted onto a topic. Up to ${PER_CALL} links per call, each with an optional note on why it was kept. Links already in the library are skipped.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        links: {
+          type: "array",
+          minItems: 1,
+          maxItems: PER_CALL,
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "The link." },
+              note: { type: "string", maxLength: 600, description: "Why it is worth keeping, in a line, as the reader would write it." },
+            },
+            required: ["url"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["links"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -69,7 +98,7 @@ const TOOLS = [
   {
     name: "search_library",
     title: "Search the library",
-    description: "Find texts in the reader's Gloss library by words in the title, author, source or tags, by topic, or by reading status. With no arguments, lists the most recently added.",
+    description: "Find texts, and links kept as cards, in the reader's Gloss library by words in the title, author, source, tags or a link's note, by topic, or by reading status (texts only). With no arguments, lists the most recently added.",
     inputSchema: {
       type: "object",
       properties: {
@@ -167,6 +196,7 @@ async function answer(msg: Rpc, userId: string, label: string): Promise<object |
       try {
         if (name === "save_articles") return ok(await saveArticles(userId, args, label));
         if (name === "save_text") return ok(await saveText(userId, args, label));
+        if (name === "save_links") return ok(await saveLinks(userId, args, label));
         if (name === "search_library") return ok(await searchLibrary(userId, args));
         if (name === "list_topics") return ok(await listTopics(userId));
         return err(-32602, `Unknown tool: ${name}`);
@@ -184,7 +214,8 @@ const toolResult = (text: string, structured: Record<string, unknown>) => ({ con
 
 /* ---------- save_articles ---------- */
 
-type Saved = { url: string; status: "saved" | "already_saved" | "failed"; title?: string; topic?: string; reason?: string };
+/** `kind: "link"`: kept as a card in the Links drawer rather than shelved as a text. */
+type Saved = { url: string; status: "saved" | "already_saved" | "failed"; kind?: "link"; title?: string; topic?: string; reason?: string };
 
 
 async function saveArticles(userId: string, args: Record<string, unknown>, via: string) {
@@ -210,10 +241,19 @@ async function saveArticles(userId: string, args: Record<string, unknown>, via: 
     if (budget <= 0) return { url, status: "failed", reason: `The daily limit of ${PER_DAY} saves is reached. Try again tomorrow.` };
     budget--;
 
+    // A repo, a tool or a site's home page is kept as a card, as it is when the reader pastes one.
+    if (looksLikeLink(url)) {
+      const s = await keepLinkFor(userId, url, via);
+      if (s.status === "saved") have.set(key, { id: "", data: { title: s.title }, pct: 0 });
+      return s;
+    }
+
     // An arXiv abstract page holds only the abstract, and an agent can't save the PDF: arXiv's HTML rendering is the whole paper.
     const html = arxivFullText(url, "html");
     let r = html ? await fetchArticle(html) : null;
     if (!r?.ok) r = await fetchArticle(url, { pdf: true });
+    // A page with no article on it is still worth keeping, as a card.
+    if (!r.ok && r.notArticle) return keepLinkFor(userId, url, via);
     if (!r.ok) return { url, status: "failed", reason: r.error };
     if ("pdf" in r) return { url, status: "failed", reason: "This link is a PDF. Agents can't save PDFs yet; open it in Gloss to read it." };
     const a = r.article;
@@ -239,12 +279,99 @@ async function saveArticles(userId: string, args: Record<string, unknown>, via: 
   const order = new Map(raw.map((u, i) => [u, i]));
   results.sort((a, b) => (order.get(a.url) ?? 0) - (order.get(b.url) ?? 0));
 
-  const count = (s: Saved["status"]) => results.filter((r) => r.status === s).length;
+  return toolResult(`${report(results)}\n\nThey'll be on the shelves at ${SITE}/library.`, { saved: count(results, "saved"), alreadySaved: count(results, "already_saved"), failed: count(results, "failed"), results });
+}
+
+const count = (results: Saved[], s: Saved["status"]) => results.filter((r) => r.status === s).length;
+
+function report(results: Saved[]) {
   const lines = results.map((r) =>
-    r.status === "saved" ? `Saved: ${r.title} (${r.topic})` : r.status === "already_saved" ? `Already in the library: ${r.title || r.url}` : `Not saved: ${r.url}. ${r.reason}`
+    r.status === "saved"
+      ? `${r.kind === "link" ? "Kept as a link" : "Saved"}: ${r.title} (${r.topic})`
+      : r.status === "already_saved"
+        ? `Already in the library: ${r.title || r.url}`
+        : `Not saved: ${r.url}. ${r.reason}`
   );
-  const head = `${count("saved")} saved, ${count("already_saved")} already in the library, ${count("failed")} not saved.`;
-  return toolResult(`${head}\n${lines.join("\n")}\n\nThey'll be on the shelves at ${SITE}/library.`, { saved: count("saved"), alreadySaved: count("already_saved"), failed: count("failed"), results });
+  return `${count(results, "saved")} saved, ${count(results, "already_saved")} already in the library, ${count(results, "failed")} not saved.\n${lines.join("\n")}`;
+}
+
+/* ---------- save_links ---------- */
+
+async function saveLinks(userId: string, args: Record<string, unknown>, via: string) {
+  const raw = (Array.isArray(args.links) ? args.links : [])
+    .map((l) => (typeof l === "string" ? { url: l } : (l as { url?: unknown; note?: unknown })))
+    .filter((l): l is { url: string; note?: unknown } => typeof l?.url === "string" && l.url.trim().length > 0);
+  if (!raw.length) return toolError("Send at least one link in `links`, as { url, note }.");
+  if (raw.length > PER_CALL) return toolError(`At most ${PER_CALL} links per call. Send the rest in another call.`);
+
+  const shelf = await shelfOf(userId);
+  const have = new Map<string, ShelfRow>();
+  for (const r of shelf) if (typeof r.data.sourceUrl === "string") have.set(normalizeUrl(r.data.sourceUrl), r);
+  let budget = savesLeft(shelf);
+  const seen = new Set<string>();
+  const queue = raw.map((l) => ({ ...l, key: normalizeUrl(l.url) })).filter((x) => (seen.has(x.key) ? false : (seen.add(x.key), true)));
+  const results: Saved[] = [];
+
+  const next = async () => {
+    for (let x = queue.shift(); x; x = queue.shift()) {
+      const known = have.get(x.key);
+      if (known) {
+        results.push({ url: x.url, status: "already_saved", title: String(known.data.title ?? "") });
+        continue;
+      }
+      if (budget <= 0) {
+        results.push({ url: x.url, status: "failed", reason: `The daily limit of ${PER_DAY} saves is reached. Try again tomorrow.` });
+        continue;
+      }
+      budget--;
+      const note = typeof x.note === "string" ? x.note.replace(/\s+/g, " ").trim().slice(0, 600) : undefined;
+      results.push(await keepLinkFor(userId, x.url, via, note).catch((e) => ({ url: x!.url, status: "failed" as const, reason: String(e) })));
+    }
+  };
+  await Promise.all([next(), next(), next(), next()]);
+  const order = new Map(raw.map((l, i) => [l.url, i]));
+  results.sort((a, b) => (order.get(a.url) ?? 0) - (order.get(b.url) ?? 0));
+  return toolResult(`${report(results)}\n\nThey'll be in Links at ${SITE}/library.`, { saved: count(results, "saved"), alreadySaved: count(results, "already_saved"), failed: count(results, "failed"), results });
+}
+
+/** Keep one link as a card on a reader's shelf, sorted onto a topic on their allowance. */
+async function keepLinkFor(userId: string, url: string, via: string, note?: string): Promise<Saved> {
+  const r = await fetchLink(url);
+  if (!r.ok) return { url, status: "failed", reason: r.error };
+  const l = r.link;
+  let topic: TopicKey | undefined;
+  let tags: string[] | undefined;
+  const free = await checkFreeUser(userId);
+  if (free.ok) {
+    const c = await classify({ title: l.title, source: l.source, dek: l.dek, link: true });
+    if (c.ok) {
+      await chargeFree(free.subject, c.usd);
+      topic = c.shelving.topic;
+      tags = c.shelving.tags.length ? c.shelving.tags : undefined;
+    }
+  }
+  const item: LibraryItem = {
+    id: linkId(l.title),
+    kind: "link",
+    title: l.title,
+    source: l.source,
+    words: 0,
+    origin: "url",
+    addedAt: Date.now(),
+    dek: l.dek,
+    sourceUrl: l.url,
+    image: l.image,
+    icon: l.icon,
+    meta: l.meta,
+    note: note || undefined,
+    topic,
+    tags,
+    addedBy: "agent",
+    addedVia: via || undefined,
+  };
+  for (const k of Object.keys(item) as (keyof LibraryItem)[]) if (item[k] === undefined) delete item[k];
+  await shelveForUser(userId, item, null);
+  return { url, status: "saved", kind: "link", title: l.title, topic: TOPIC[topic ?? "unsorted"].name };
 }
 
 /** Saves an agent may still make today: PER_DAY across both save tools. */
@@ -341,7 +468,20 @@ function shelfItem(a: Article, s: { topic?: TopicKey; tags?: string[]; scene?: s
 function describe(r: ShelfRow) {
   const d = r.data;
   const topic = isTopic(d.topic) ? d.topic : "unsorted";
+  // A card in the Links drawer: no text to read, so no length, status or reader link.
+  if (d.kind === "link")
+    return {
+      kind: "link" as const,
+      title: String(d.title ?? ""),
+      url: typeof d.sourceUrl === "string" ? d.sourceUrl : undefined,
+      description: typeof d.dek === "string" ? d.dek : undefined,
+      note: typeof d.note === "string" ? d.note : undefined,
+      topic: TOPIC[topic].name,
+      tags: Array.isArray(d.tags) ? (d.tags as string[]) : [],
+      addedAt: new Date(Number(d.addedAt ?? 0)).toISOString().slice(0, 10),
+    };
   return {
+    kind: "text" as const,
     title: String(d.title ?? ""),
     author: typeof d.author === "string" ? d.author : undefined,
     url: typeof d.sourceUrl === "string" ? d.sourceUrl : undefined,
@@ -362,13 +502,18 @@ async function searchLibrary(userId: string, args: Record<string, unknown>) {
   const shelf = (await shelfOf(userId)).filter((r) => r.data.origin !== "sample");
   const found = shelf
     .map(describe)
-    .filter((b) => (!topic || b.topic === TOPIC[topic].name) && (!status || b.status === status))
-    .filter((b) => words.every((w) => `${b.title} ${b.author ?? ""} ${b.url ?? ""} ${b.topic} ${b.tags.join(" ")}`.toLowerCase().includes(w)))
+    .filter((b) => (!topic || b.topic === TOPIC[topic].name) && (!status || (b.kind === "text" && b.status === status)))
+    .filter((b) => {
+      const text = b.kind === "link" ? `${b.title} ${b.url ?? ""} ${b.description ?? ""} ${b.note ?? ""}` : `${b.title} ${b.author ?? ""} ${b.url ?? ""}`;
+      return words.every((w) => `${text} ${b.topic} ${b.tags.join(" ")}`.toLowerCase().includes(w));
+    })
     .sort((a, b) => b.addedAt.localeCompare(a.addedAt));
   const shown = found.slice(0, limit);
-  const text = shown.length
-    ? `${found.length} found${found.length > shown.length ? `, showing ${shown.length}` : ""}:\n${shown.map((b) => `- ${b.title}${b.author ? `, ${b.author}` : ""} (${b.topic}, ${b.minutes} min, ${b.status})${b.url ? ` ${b.url}` : ""}`).join("\n")}`
-    : "Nothing in the library matches.";
+  const line = (b: (typeof found)[number]) =>
+    b.kind === "link"
+      ? `- Link: ${b.title} (${b.topic})${b.url ? ` ${b.url}` : ""}${b.note ? `. Note: ${b.note}` : ""}`
+      : `- ${b.title}${b.author ? `, ${b.author}` : ""} (${b.topic}, ${b.minutes} min, ${b.status})${b.url ? ` ${b.url}` : ""}`;
+  const text = shown.length ? `${found.length} found${found.length > shown.length ? `, showing ${shown.length}` : ""}:\n${shown.map(line).join("\n")}` : "Nothing in the library matches.";
   return toolResult(text, { total: found.length, results: shown });
 }
 

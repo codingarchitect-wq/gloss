@@ -3,27 +3,30 @@
 import { useUser } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, ViewTransition } from "react";
-import { ChevronLeft, ChevronRight, LayoutGrid, Library as LibraryIcon, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, LayoutGrid, Library as LibraryIcon, Link2, Search, X } from "lucide-react";
 import { TopBar } from "@/components/ui/TopBar";
 import { readingMinutes, tidyTitle, wordCount } from "@/lib/article";
 import { forgetCover, paintAll } from "@/lib/covers";
 import { SAMPLE_SHELF } from "@/lib/classics";
 import { SORTS, sortBooks, TAGS, TOPIC, TOPICS, topicOf, type Book, type Sort, type TagKey, type Topic, type TopicKey } from "@/lib/library";
+import { keepAsLink } from "@/lib/keep-link";
 import { hideSample, useLibraryPrefs } from "@/lib/library-prefs";
+import { isLink } from "@/lib/links";
 import { SAMPLES } from "@/lib/samples";
 import { applySettings } from "@/lib/settings";
 import { backfill } from "@/lib/shelving";
-import { useStore } from "@/lib/store";
+import { useStore, type LibraryItem } from "@/lib/store";
 import { watchShelf } from "@/lib/sync";
 import { AddButton, AddPanel, type AddTab } from "./AddPanel";
 import { Arrivals, type Wave } from "./Arrivals";
 import { Glyph } from "./Book";
 import { BookOpen, type Origin } from "./BookOpen";
+import { LINK_SORTS, LinkDrawer, LinkPanel, LinkStrip, linkWords, type LinkSort } from "./Links";
 import { Shelf } from "./Shelf";
 import { Starter } from "./Starter";
 import { TopicGrid, TopicPage } from "./Topics";
 
-type View = "shelf" | "topics";
+type View = "shelf" | "topics" | "links";
 
 const SEEN_KEY = "gloss:library-seen";
 /** Samples stay on the shelf until it has this many texts of your own, or for good once opened, unless taken off. */
@@ -34,7 +37,8 @@ const SAMPLES_UNTIL = 6;
  * arranges by topic, recency, colour or length; the topics view opens each
  * subject into a display of covers. Any book comes off the shelf into your
  * hands, and from there into the reader. New texts, yours or your agent's,
- * drop onto the shelf as they arrive.
+ * drop onto the shelf as they arrive. Links kept rather than read (repos,
+ * tools, sites) live as cards in a drawer beside the shelves: Links.
  */
 export function Library() {
   const router = useRouter();
@@ -56,6 +60,10 @@ export function Library() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<{ id: string; origin: Origin } | null>(null);
   const [adding, setAdding] = useState<AddTab | null>(null);
+  const [openLink, setOpenLink] = useState<string | null>(null);
+  const [linkSort, setLinkSort] = useState<LinkSort>("recent");
+  /** The drawer's filter: a topic, or favourites. */
+  const [linkOnly, setLinkOnly] = useState<TopicKey | "favorite" | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const [leaving, setLeaving] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -108,7 +116,8 @@ export function Library() {
     for (const id of added) setTimeout(() => setFresh((f) => (f.has(id) ? new Set([...f].filter((x) => x !== id)) : f)), 2600);
 
     // And they gather on the arrivals card: one card per run, kept open while more keep coming.
-    const items = library.filter((x) => added.includes(x.id) && x.origin !== "sample");
+    // Cards go to the drawer, where they drop in on their own; the arrivals card is for the shelf.
+    const items = library.filter((x) => added.includes(x.id) && x.origin !== "sample" && !isLink(x));
     if (!items.length) return;
     const byAgent = items.find((x) => x.addedBy === "agent");
     setWave((w) => {
@@ -133,11 +142,13 @@ export function Library() {
     if (hydrated && prefs.paintedCovers) void paintAll(useStore.getState().library);
   }, [hydrated, prefs.paintedCovers, library]);
 
-  const own = library.filter((x) => x.origin !== "sample");
+  const texts = useMemo(() => library.filter((x) => !isLink(x)), [library]);
+  const links = useMemo(() => library.filter(isLink), [library]);
+  const own = texts.filter((x) => x.origin !== "sample");
   const books = useMemo(() => {
     const read = (id: string) => (hydrated ? progress[id]?.pct ?? 0 : 0);
     const marks = (id: string) => (hydrated ? (highlights[id] ?? []).length : 0);
-    const mine: Book[] = library.map((x) => ({
+    const mine: Book[] = texts.map((x) => ({
       id: x.id,
       title: tidyTitle(x.title),
       author: bylineOf(x),
@@ -175,9 +186,9 @@ export function Library() {
       sample: true,
     }));
     return [...mine, ...samples];
-    // `own.length` is derived from `library`.
+    // `own.length` is derived from `texts`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [library, progress, highlights, hydrated, prefs.hiddenSamples]);
+  }, [texts, progress, highlights, hydrated, prefs.hiddenSamples]);
 
   const sorted = useMemo(() => sortBooks(books, sort), [books, sort]);
 
@@ -191,9 +202,27 @@ export function Library() {
   );
   const shown = useMemo(() => new Set(sorted.filter((b) => (!only || b.topic === only) && match(b)).map((b) => b.id)), [sorted, only, match]);
 
+  // The same search finds cards: by their title, site, description, tags and note.
+  const matchLink = useCallback(
+    (l: LibraryItem) => {
+      const words = q.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      const text = linkWords(l);
+      return words.every((w) => text.includes(w));
+    },
+    [q]
+  );
+  const drawer = useMemo(
+    () => links.filter((l) => (!linkOnly || (linkOnly === "favorite" ? l.favorite : topicOf(l.topic) === linkOnly)) && matchLink(l)),
+    [links, linkOnly, matchLink]
+  );
+  const linkTopics = useMemo(() => TOPICS.map((t) => ({ topic: t, n: links.filter((l) => topicOf(l.topic) === t.key).length })).filter((x) => x.n), [links]);
+
   const topics = useMemo(
-    () => TOPICS.map((t) => ({ topic: t, books: books.filter((b) => b.topic === t.key).sort((a, b) => b.added - a.added) })).filter((x) => x.books.length),
-    [books]
+    () =>
+      TOPICS.map((t) => ({ topic: t, books: books.filter((b) => b.topic === t.key).sort((a, b) => b.added - a.added), links: links.filter((l) => topicOf(l.topic) === t.key).length })).filter(
+        (x) => x.books.length || x.links
+      ),
+    [books, links]
   );
 
   const stats = useMemo(() => {
@@ -204,8 +233,9 @@ export function Library() {
       hours: Math.max(1, Math.round(mins / 60)),
       reading: books.filter((b) => b.pct > 0 && b.pct < 1).length,
       read: books.filter((b) => b.pct >= 1).length,
+      links: links.length,
     };
-  }, [books, topics]);
+  }, [books, topics, links]);
 
   const fromAgent = useMemo(() => (lastSeen ? books.filter((b) => b.agent && b.added > lastSeen) : []), [books, lastSeen]);
 
@@ -219,10 +249,20 @@ export function Library() {
     window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, []);
 
+  // From the shelf's search to the drawer, with the search kept.
+  const toLinks = useCallback(() => {
+    startTransition(() => {
+      setView("links");
+      setTopic(null);
+      setLinkOnly(null);
+    });
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  }, []);
+
   // "/" to search, wherever you are; Esc steps back out of a topic.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (open || adding || e.metaKey || e.ctrlKey || (e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]")) return;
+      if (open || adding || openLink || e.metaKey || e.ctrlKey || (e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]")) return;
       if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
@@ -230,7 +270,7 @@ export function Library() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, adding, topic, go]);
+  }, [open, adding, openLink, topic, go]);
 
   const read = useCallback(
     (b: Book) => {
@@ -241,16 +281,25 @@ export function Library() {
   );
 
   const openBook = open ? books.find((b) => b.id === open.id) ?? null : null;
+  const openCard = openLink ? links.find((l) => l.id === openLink) ?? null : null;
+  const pickLink = useCallback((l: LibraryItem) => setOpenLink(l.id), []);
   const first = user?.firstName;
   const owner = user?.fullName || first || "A Gloss reader";
   const T = topic ? TOPIC[topic] : null;
   const topicBooks = useMemo(() => (topic ? books.filter((b) => b.topic === topic).sort((a, b) => b.added - a.added).filter(match) : []), [topic, books, match]);
+  const topicLinks = useMemo(() => (topic ? links.filter((l) => topicOf(l.topic) === topic && matchLink(l)) : []), [topic, links, matchLink]);
   const screen = topic ? `topic-${topic}` : view;
 
   const searchBox = (
     <label className="lib-search">
       <Search size={15} className="shrink-0 text-ink-4" aria-hidden />
-      <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={T ? `Search ${T.name}` : "Search the library"} aria-label="Search the library" />
+      <input
+        ref={searchRef}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder={T ? `Search ${T.name}` : view === "links" ? "Search your links" : "Search the library"}
+        aria-label="Search the library"
+      />
       {q ? (
         <button type="button" aria-label="Clear search" onClick={() => setQ("")} className="grid size-5 place-items-center rounded-full text-ink-3 hover:bg-sunk">
           <X size={13} />
@@ -309,6 +358,11 @@ export function Library() {
                           <b>{stats.read}</b> read
                         </span>
                       )}
+                      {stats.links > 0 && (
+                        <span>
+                          <b>{stats.links}</b> {stats.links === 1 ? "link" : "links"}
+                        </span>
+                      )}
                     </>
                   )}
                 </p>
@@ -345,6 +399,16 @@ export function Library() {
                 ))}
               </div>
             )}
+            {view === "links" && (
+              <div className="lib-sort" role="radiogroup" aria-label="Arrange links by">
+                <span className="px-2 text-[12.5px] text-ink-4 max-md:hidden">Arrange by</span>
+                {LINK_SORTS.map((s) => (
+                  <button key={s.key} type="button" role="radio" aria-checked={linkSort === s.key} onClick={() => setLinkSort(s.key)}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -353,13 +417,36 @@ export function Library() {
             <Chip on={!only && !tag} onClick={() => (setOnly(null), setTag(null))}>
               All <span className="lib-n">{books.length}</span>
             </Chip>
-            {topics.map(({ topic: t, books: bs }) => (
-              <Chip key={t.key} on={only === t.key} color={t.shades[0]} onClick={() => setOnly(only === t.key ? null : t.key)}>
-                <Glyph k={t.key} size={18} /> {t.name} <span className="lib-n">{bs.length}</span>
-              </Chip>
-            ))}
+            {topics
+              .filter((x) => x.books.length)
+              .map(({ topic: t, books: bs }) => (
+                <Chip key={t.key} on={only === t.key} color={t.shades[0]} onClick={() => setOnly(only === t.key ? null : t.key)}>
+                  <Glyph k={t.key} size={18} /> {t.name} <span className="lib-n">{bs.length}</span>
+                </Chip>
+              ))}
             {TAGS.some((t) => books.some(t.test)) && <span aria-hidden className="mx-1.5 h-4 w-px shrink-0 self-center bg-rule-strong" />}
             {tagChips(books)}
+          </ChipRow>
+        )}
+
+        {view === "links" && !T && links.length > 0 && (
+          <ChipRow label="Filter links">
+            <Chip on={!linkOnly} onClick={() => setLinkOnly(null)}>
+              All <span className="lib-n">{links.length}</span>
+            </Chip>
+            {linkTopics.map(({ topic: t, n }) => (
+              <Chip key={t.key} on={linkOnly === t.key} color={t.shades[0]} onClick={() => setLinkOnly(linkOnly === t.key ? null : t.key)}>
+                <Glyph k={t.key} size={18} /> {t.name} <span className="lib-n">{n}</span>
+              </Chip>
+            ))}
+            {links.some((l) => l.favorite) && (
+              <>
+                <span aria-hidden className="mx-1.5 h-4 w-px shrink-0 self-center bg-rule-strong" />
+                <Chip on={linkOnly === "favorite"} onClick={() => setLinkOnly(linkOnly === "favorite" ? null : "favorite")}>
+                  <Glyph k="favorite" size={18} /> Favourites <span className="lib-n">{links.filter((l) => l.favorite).length}</span>
+                </Chip>
+              </>
+            )}
           </ChipRow>
         )}
 
@@ -376,6 +463,8 @@ export function Library() {
                   </div>
                 }
                 onOpen={(b, el) => setOpen({ id: b.id, origin: { el, kind: "cover" } })}
+                links={<LinkStrip title={`${T.name} links`} links={topicLinks} fresh={fresh} onOpen={pickLink} max={60} full />}
+                linkCount={topicLinks.length}
               />
             ) : view === "shelf" ? (
               <>
@@ -393,12 +482,15 @@ export function Library() {
                 {hydrated && shown.size === 0 && books.length > 0 && (
                   <p className="py-6 text-center text-[14px] text-ink-3">Nothing on the shelves matches{q ? <> &ldquo;{q}&rdquo;</> : ""}.</p>
                 )}
+                {hydrated && q.trim() && <LinkStrip title="Links" links={links.filter(matchLink)} fresh={fresh} onOpen={pickLink} onAll={toLinks} max={4} />}
                 {hydrated && own.length < SAMPLES_UNTIL ? (
                   <Starter count={own.length} signedIn={Boolean(isSignedIn)} onAdd={setAdding} />
                 ) : (
                   hydrated && <p className="lib-hint">Click a spine to take it down. Arrow keys walk the shelf.</p>
                 )}
               </>
+            ) : view === "links" ? (
+              hydrated && <LinkDrawer links={drawer} total={links.length} sort={linkSort} q={q} fresh={fresh} onOpen={pickLink} />
             ) : (
               <TopicGrid topics={topics} onPick={(t: Topic) => go({ view: "topics", topic: t.key })} />
             )}
@@ -414,6 +506,10 @@ export function Library() {
           owner={owner}
           onRead={read}
           onShelve={(b, patch) => shelveItem(b.id, patch)}
+          onKeepAsLink={(b) => {
+            setOpen(null);
+            if (keepAsLink(b.id)) toLinks();
+          }}
           onRemove={(b) => {
             setOpen(null);
             if (b.sample) return hideSample(b.id);
@@ -448,6 +544,18 @@ export function Library() {
               removeFromLibrary(id);
               void forgetCover(id);
             }
+          }}
+        />
+      )}
+      {openCard && (
+        <LinkPanel
+          key={openCard.id}
+          link={openCard}
+          onClose={() => setOpenLink(null)}
+          onRead={(id) => {
+            setOpenLink(null);
+            setLeaving(true);
+            router.push(`/read/${id}`);
           }}
         />
       )}
@@ -525,6 +633,9 @@ function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View) => voi
       </button>
       <button type="button" role="radio" aria-checked={view === "topics"} onClick={() => onChange("topics")}>
         <LayoutGrid size={15} /> Topics
+      </button>
+      <button type="button" role="radio" aria-checked={view === "links"} onClick={() => onChange("links")}>
+        <Link2 size={15} /> Links
       </button>
     </div>
   );

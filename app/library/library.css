@@ -192,7 +192,7 @@
 .lib-switch {
   position: relative;
   display: inline-grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   padding: 3px;
   border-radius: 999px;
   background: var(--bg-sunk);
@@ -220,7 +220,7 @@
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc((100% - 6px) / 2);
+  width: calc((100% - 6px) / 3);
   border-radius: 999px;
   background: var(--bg-raised);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 2px 8px -2px rgb(0 0 0 / 0.1);
@@ -228,6 +228,15 @@
 }
 .lib-switch[data-view="topics"] .lib-switch-pill {
   transform: translateX(100%);
+}
+.lib-switch[data-view="links"] .lib-switch-pill {
+  transform: translateX(200%);
+}
+@media (max-width: 639px) {
+  .lib-switch button {
+    padding: 0 11px;
+    gap: 5px;
+  }
 }
 
 .lib-back {
@@ -993,6 +1002,36 @@ button.plank-label:hover .plank-n {
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1);
   transition: transform 0.3s var(--ease-out);
   transition-delay: calc(var(--j) * 22ms);
+}
+/* A topic's links, as a few index cards standing at the end of its mini shelf. */
+.mini-cards {
+  display: inline-flex;
+  align-items: flex-end;
+  margin-left: 8px;
+  transition: transform 0.3s var(--ease-out);
+  transition-delay: calc(var(--j) * 22ms);
+}
+.mini-card {
+  display: block;
+  width: 22px;
+  height: 30px;
+  margin-left: -13px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(var(--bg-raised) 6px, color-mix(in oklab, var(--rubric) 55%, var(--bg-raised)) 6px 7px, var(--bg-raised) 7px);
+  box-shadow: inset 0 0 0 1px var(--rule-strong), -1px 0 2px rgb(0 0 0 / 0.08);
+  transform: rotate(-4deg);
+  transform-origin: bottom left;
+}
+.mini-card:first-child {
+  margin-left: 0;
+}
+.mini-card:nth-child(even) {
+  transform: rotate(3deg);
+}
+@media (hover: hover) and (pointer: fine) {
+  .topic-card:hover .mini-cards {
+    transform: translateY(-5px);
+  }
 }
 @media (hover: hover) and (pointer: fine) {
   .topic-card:hover {
@@ -1804,6 +1843,7 @@ button.starter-card:active {
   color: var(--ink-3);
 }
 .add-rows li[data-state="saved"] .add-dot,
+.add-rows li[data-state="linked"] .add-dot,
 .add-rows li[data-state="already"] .add-dot {
   background: color-mix(in oklab, var(--good) 16%, transparent);
   color: var(--good);
@@ -2079,5 +2119,529 @@ button.starter-card:active {
     animation: none;
     opacity: 0;
     transition: opacity 0.2s ease;
+  }
+}
+
+
+/* ==========================================================================
+   Links: the card catalogue beside the shelves. Each link kept (a repo, a
+   tool, a site) is an index card: its picture on the left, and on the right
+   where it goes, what it is under a red rule, and the reader's note.
+   ========================================================================== */
+
+.link-drawer {
+  margin-top: 22px;
+  animation: rise 0.6s 0.1s var(--ease-out) both;
+}
+
+.link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.link-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  gap: 14px;
+  padding: 12px 14px 12px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--rule);
+  background: var(--bg-raised);
+  box-shadow: 0 1px 1px rgb(40 30 20 / 0.03);
+  animation: rise 0.5s var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 14) * 28ms);
+  transition: transform 0.28s var(--ease-out), box-shadow 0.28s var(--ease-out), border-color 0.2s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .link-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--rule-strong);
+    box-shadow: var(--shadow-card);
+  }
+}
+/* Just kept: a brief glow in the pen's colour as it drops into the drawer. */
+.link-card[data-fresh] {
+  animation: rise 0.5s var(--ease-out) both, link-fresh 2.4s 0.2s ease-out both;
+}
+@keyframes link-fresh {
+  0% {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--rubric) 40%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+/* The whole card is the link; the tools sit above it. */
+.link-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  outline: none;
+}
+.link-hit:focus-visible {
+  outline: 2px solid var(--rubric);
+  outline-offset: 3px;
+}
+
+.link-thumb {
+  position: relative;
+  flex: none;
+  align-self: flex-start;
+  width: 164px;
+  aspect-ratio: 1.91 / 1;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--bg-sunk);
+  box-shadow: inset 0 0 0 1px rgb(40 30 20 / 0.06);
+}
+.link-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.link-thumb.is-plain {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(140deg, var(--c), var(--c-deep));
+}
+.link-mark {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 6px 14px -6px rgb(0 0 0 / 0.35);
+}
+.link-mark img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+.link-letter {
+  font-family: var(--font-serif);
+  font-size: 34px;
+  line-height: 1;
+  color: rgb(255 255 255 / 0.92);
+}
+.link-thumb.is-big .link-mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+.link-thumb.is-big .link-mark img {
+  width: 38px;
+  height: 38px;
+}
+.link-thumb.is-big .link-letter {
+  font-size: 56px;
+}
+
+.link-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.link-site {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding-right: 30px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.link-favicon {
+  flex-shrink: 0;
+  border-radius: 3px;
+  object-fit: contain;
+}
+/* Most site icons are drawn for a light page: on a dark one they sit on a small paper tile. */
+[data-theme="night"] .link-favicon,
+[data-theme="ink"] .link-favicon {
+  padding: 1px;
+  background: #f3efe6;
+}
+.link-title {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 450;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+/* A catalogue card's red rule, under its heading. */
+.link-rule {
+  display: block;
+  height: 1px;
+  margin: 7px 0 6px;
+  background: color-mix(in oklab, var(--rubric) 45%, transparent);
+}
+.link-dek {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.link-note {
+  display: -webkit-box;
+  margin-top: 6px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  padding-left: 9px;
+  border-left: 2px solid color-mix(in oklab, var(--c) 55%, transparent);
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.link-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: auto;
+  padding-top: 9px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.link-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.link-fact.is-archived {
+  color: var(--rubric-text);
+}
+.link-lang {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1);
+}
+
+.link-tools {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.link-tools .ob-icon {
+  background: var(--bg-raised);
+}
+.link-tools .ob-icon:hover {
+  background: var(--bg-sunk);
+}
+.link-card:hover .link-tools,
+.link-card:focus-within .link-tools {
+  opacity: 1;
+}
+@media (hover: none) {
+  .link-tools {
+    opacity: 1;
+  }
+}
+
+.link-card[data-compact] .link-thumb {
+  width: 120px;
+}
+.link-card[data-compact] .link-title {
+  font-size: 15.5px;
+}
+
+@media (max-width: 639px) {
+  .link-card {
+    gap: 12px;
+    padding: 10px 12px 10px 10px;
+  }
+  .link-thumb,
+  .link-card[data-compact] .link-thumb {
+    width: 104px;
+  }
+  .link-title {
+    font-size: 16px;
+  }
+}
+
+/* The slot at the top of the drawer, to keep another. */
+.link-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.link-add-field {
+  display: flex;
+  height: 42px;
+  min-width: 0;
+  max-width: 560px;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px dashed var(--rule-strong);
+  background: color-mix(in oklab, var(--bg-raised) 60%, transparent);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.link-add-field:focus-within {
+  border-style: solid;
+  border-color: var(--rule-strong);
+  background: var(--bg-raised);
+}
+.link-add-field input {
+  height: 100%;
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  font-size: 14px;
+  color: var(--ink);
+  outline: none;
+}
+.link-add-field input::placeholder {
+  color: var(--ink-4);
+}
+.link-add .add-btn {
+  height: 42px;
+  padding: 0 20px;
+}
+.link-add .add-btn:disabled {
+  opacity: 0.4;
+}
+.link-add-note {
+  flex-basis: 100%;
+  padding-left: 16px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.link-add-note.is-bad {
+  color: var(--rubric-text);
+}
+
+.link-empty {
+  margin-top: 28px;
+  padding: 48px 20px 52px;
+  border-radius: 16px;
+  border: 1px dashed var(--rule-strong);
+  text-align: center;
+}
+
+/* A drawer's label holder, over each topic's cards. */
+.link-group {
+  margin-top: 30px;
+}
+.link-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px 5px 9px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--wood) 40%, var(--rule));
+  background: linear-gradient(var(--bg-raised), color-mix(in oklab, var(--bg-raised) 86%, var(--wood) 14%));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45), 0 1px 2px rgb(40 30 20 / 0.1);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--c) 55%, var(--ink));
+}
+.link-label .lib-n {
+  letter-spacing: 0;
+}
+
+/* A few cards under the shelf's search, or a topic's books. */
+.link-strip {
+  margin-top: 34px;
+}
+.link-strip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.link-strip-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.link-strip-title svg {
+  color: var(--ink-4);
+}
+.link-strip-title .lib-n {
+  font-family: var(--font-sans, inherit);
+  font-size: 14px;
+}
+
+/* One card, pulled out of the drawer. */
+.link-panel {
+  position: absolute;
+  left: 50%;
+  top: max(6vh, 24px);
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100dvh - max(12vh, 48px));
+  overflow-y: auto;
+  translate: -50% 0;
+  border-radius: 20px;
+  border: 1px solid var(--rule);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 0.22s var(--ease-out) both;
+}
+.link-panel > .link-thumb {
+  width: 100%;
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--rule);
+}
+.link-panel-body {
+  padding: 16px 20px 18px;
+}
+.link-panel-title {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: 8px;
+  background: transparent;
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 420;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  outline: none;
+  text-overflow: ellipsis;
+  transition: background-color 0.2s ease;
+}
+.link-panel-title:hover {
+  background: color-mix(in oklab, var(--bg-sunk) 60%, transparent);
+}
+.link-panel-title:focus {
+  background: var(--bg-sunk);
+}
+.link-panel-url {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--ink-3);
+  transition: color 0.2s ease;
+}
+.link-panel-url:hover {
+  color: var(--ink);
+}
+.link-panel-dek {
+  margin-top: 12px;
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.link-panel .ob-tags > span.link-fact {
+  padding: 3px 9px 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.link-panel-note {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--ink);
+  resize: none;
+  outline: none;
+  field-sizing: content;
+  min-height: 3.2em;
+  transition: border-color 0.2s ease;
+}
+.link-panel-note:focus {
+  border-color: var(--rule-strong);
+}
+.link-panel-note::placeholder {
+  color: var(--ink-4);
+}
+.link-panel-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 18px;
+}
+.link-panel-text {
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-strong);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  transition: background-color 0.2s ease, transform 0.15s var(--ease-out);
+}
+.link-panel-text:hover {
+  background: var(--bg-sunk);
+}
+.link-panel-text:active {
+  transform: scale(0.98);
+}
+.link-panel-text:disabled {
+  opacity: 0.6;
+}
+.link-panel-foot {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link-drawer,
+  .link-card,
+  .link-card[data-fresh] {
+    animation: fade 0.3s both;
+  }
+  .link-card:hover {
+    transform: none;
   }
 }

@@ -11,13 +11,14 @@ import type { Article } from "./article";
 import { readApiKey } from "./ask";
 import type { Shelving } from "./library";
 import { excerptOf } from "./excerpt";
+import { isLink } from "./links";
 import { loadDoc, useStore, type LibraryItem } from "./store";
 
 const inflight = new Set<string>();
 /** The free allowance ran out: stop sorting quietly until the next visit. */
 let resting = false;
 
-type Text = Pick<Article, "id" | "title" | "author" | "source" | "dek"> & { blocks?: Article["blocks"] };
+type Text = Pick<Article, "id" | "title" | "author" | "source" | "dek"> & { blocks?: Article["blocks"]; kind?: "link" };
 
 export async function shelveText(a: Text): Promise<void> {
   if (resting || inflight.has(a.id)) return;
@@ -26,7 +27,7 @@ export async function shelveText(a: Text): Promise<void> {
     const res = await fetch("/api/shelve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: a.title, author: a.author, source: a.source, dek: a.dek, excerpt: a.blocks ? excerptOf(a.blocks) : undefined, apiKey: readApiKey() || undefined }),
+      body: JSON.stringify({ title: a.title, author: a.author, source: a.source, dek: a.dek, excerpt: a.blocks ? excerptOf(a.blocks) : undefined, link: a.kind === "link" || undefined, apiKey: readApiKey() || undefined }),
     });
     if (res.status === 429 || res.status === 401) {
       const j = (await res.json().catch(() => ({}))) as { code?: string };
@@ -40,7 +41,8 @@ export async function shelveText(a: Text): Promise<void> {
     const st = useStore.getState();
     const cur = st.library.find((x) => x.id === a.id);
     if (!cur || cur.topic) return;
-    st.shelve(a.id, { topic: s.topic, tags: s.tags.length ? s.tags : undefined, scene: s.scene });
+    // A link's card shows its own picture, so it gets no scene to paint a cover from.
+    st.shelve(a.id, { topic: s.topic, tags: s.tags.length ? s.tags : undefined, ...(isLink(cur) ? {} : { scene: s.scene }) });
   } catch {
     // Unsorted is a fine place to wait.
   } finally {
@@ -60,7 +62,7 @@ export async function backfill(items: LibraryItem[], limit = 40): Promise<void> 
     const next = async () => {
       for (let x = todo.shift(); x && !resting; x = todo.shift()) {
         const doc = await loadDoc(x.id).catch(() => null);
-        await shelveText(doc ?? { id: x.id, title: x.title, author: x.author, source: x.source, dek: x.dek });
+        await shelveText(doc ?? { id: x.id, title: x.title, author: x.author, source: x.source, dek: x.dek, kind: x.kind });
         await new Promise((r) => setTimeout(r, 400));
       }
     };

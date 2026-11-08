@@ -7,7 +7,8 @@ import { TopBar } from "@/components/ui/TopBar";
 import { wordCount, type Article } from "@/lib/article";
 import { importFromFile, importFromText, importFromUrl, keep, looksLikeUrl } from "@/lib/import";
 import { hideSample, useLibraryPrefs } from "@/lib/library-prefs";
-import { normalizeUrl } from "@/lib/links";
+import { keepLink } from "@/lib/keep-link";
+import { isLink, looksLikeLink, normalizeUrl } from "@/lib/links";
 import { SAMPLES } from "@/lib/samples";
 import { applySettings } from "@/lib/settings";
 import { useStore } from "@/lib/store";
@@ -82,6 +83,14 @@ export function Landing({ signedIn: signedInAtLoad = false }: { signedIn?: boole
         host = new URL(/^https?:/i.test(host) ? host : `https://${host}`).hostname.replace(/^www\./, "");
       } catch {}
       setBusy({ label: `${later ? "Saving" : "Reading"} ${host}` });
+      // Saved for later, a repo, a tool or a site's home page goes in the library's Links drawer, as a card.
+      if (later && looksLikeLink(raw)) {
+        const k = await keepLink(raw);
+        setBusy(null);
+        if (!k.ok) return setError(k.error);
+        setUrl("");
+        return setSaved({ id: k.id, title: k.title, link: true });
+      }
       // A link to a PDF is read here in the browser, with its progress in the bar.
       const r = await importFromUrl(raw, (p, label) => setBusy({ label: label ?? `Reading ${host}`, pct: p }));
       if (!r.ok) {
@@ -113,7 +122,8 @@ export function Landing({ signedIn: signedInAtLoad = false }: { signedIn?: boole
     window.history.replaceState(null, "", "/");
     if (!looksLikeUrl(raw)) return setError("That does not look like a link.");
     const known = useStore.getState().library.find((x) => x.sourceUrl && normalizeUrl(x.sourceUrl) === normalizeUrl(raw));
-    if (known) return later ? setSaved({ id: known.id, title: known.title }) : go(known.id);
+    // A card has no text to open: to read its link now, it is read in like any other.
+    if (known && (later || !isLink(known))) return later ? setSaved({ id: known.id, title: known.title, link: isLink(known) }) : go(known.id);
     setUrl(raw);
     void fromUrl(raw, later);
   }, [hydrated, fromUrl, go]);
@@ -206,7 +216,7 @@ export function Landing({ signedIn: signedInAtLoad = false }: { signedIn?: boole
   const items: ShelfItem[] = useMemo(() => {
     const p = (id: string) => (hydrated ? progress[id]?.pct ?? 0 : 0);
     const g = (id: string) => (hydrated ? (glosses[id] ?? []).length : 0);
-    const mine = library.map((x) => ({
+    const mine = library.filter((x) => !isLink(x)).map((x) => ({
       id: x.id,
       title: x.title,
       byline: x.author || x.source || (x.origin === "paste" ? "Pasted text" : "Imported"),

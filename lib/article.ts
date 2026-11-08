@@ -95,9 +95,11 @@ export function clock(sec: number): string {
 
 /**
  * The original a server can keep for a text (lib/originals.ts): a copy of the page it came from,
- * the PDF behind a PDF link, or a YouTube video. Null for pasted text, dropped files and the bundled shelf.
+ * the PDF behind a PDF link, or a YouTube video. Null for pasted text, dropped files, the bundled shelf,
+ * and links kept as cards, which have no text to keep a copy of.
  */
-export function originalKind(a: { origin?: unknown; sourceUrl?: unknown }): "page" | "pdf" | "video" | null {
+export function originalKind(a: { origin?: unknown; sourceUrl?: unknown; kind?: unknown }): "page" | "pdf" | "video" | null {
+  if (a.kind === "link") return null;
   if (typeof a.sourceUrl !== "string" || !/^https?:\/\//i.test(a.sourceUrl)) return null;
   if (a.origin === "url") return youtubeId(a.sourceUrl) ? "video" : "page";
   return a.origin === "file" ? "pdf" : null;

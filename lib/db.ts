@@ -204,6 +204,7 @@ export async function shelveForUser(userId: string, item: { id: string }, doc: u
   await db().query(
     `insert into articles (user_id, id, article_id, data, doc, deleted, updated_at) values ($1, $2, $2, $3, $4, false, now())
      on conflict (user_id, id) do update set data = excluded.data, doc = excluded.doc, deleted = false, updated_at = now()`,
-    [userId, item.id, JSON.stringify(item), JSON.stringify(doc)]
+    // A link kept as a card has no text: its doc is null, as a bundled sample's is.
+    [userId, item.id, JSON.stringify(item), doc == null ? null : JSON.stringify(doc)]
   );
 }

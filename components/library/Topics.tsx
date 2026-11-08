@@ -6,11 +6,11 @@ import { Cover, Glyph } from "./Book";
 
 const hours = (books: Book[]) => fmtMinutes(books.reduce((n, b) => n + b.minutes, 0));
 
-/** Every topic as a card: its drawing, its name, and its books standing in a row. */
-export function TopicGrid({ topics, onPick }: { topics: { topic: Topic; books: Book[] }[]; onPick: (t: Topic) => void }) {
+/** Every topic as a card: its drawing, its name, and its books standing in a row. `links`: how many cards it has in the drawer. */
+export function TopicGrid({ topics, onPick }: { topics: { topic: Topic; books: Book[]; links?: number }[]; onPick: (t: Topic) => void }) {
   return (
     <div className="topic-grid">
-      {topics.map(({ topic: t, books }, i) => (
+      {topics.map(({ topic: t, books, links = 0 }, i) => (
         <button
           key={t.key}
           type="button"
@@ -33,7 +33,7 @@ export function TopicGrid({ topics, onPick }: { topics: { topic: Topic; books: B
                 </h3>
               </ViewTransition>
               <p className="mt-1.5 text-[13px] text-ink-3">
-                {books.length} {books.length === 1 ? "piece" : "pieces"} · {hours(books)}
+                {[books.length > 0 && `${books.length} ${books.length === 1 ? "piece" : "pieces"} · ${hours(books)}`, links > 0 && `${links} ${links === 1 ? "link" : "links"}`].filter(Boolean).join(" · ")}
               </p>
             </div>
           </div>
@@ -46,6 +46,14 @@ export function TopicGrid({ topics, onPick }: { topics: { topic: Topic; books: B
                 </ViewTransition>
               );
             })}
+            {/* Its links: a few index cards standing at the end of the shelf. */}
+            {links > 0 && (
+              <span className="mini-cards" style={{ ["--j" as string]: Math.min(books.length, 14) }}>
+                {Array.from({ length: Math.min(links, 5) }, (_, k) => (
+                  <span key={k} className="mini-card" />
+                ))}
+              </span>
+            )}
           </div>
         </button>
       ))}
@@ -53,8 +61,23 @@ export function TopicGrid({ topics, onPick }: { topics: { topic: Topic; books: B
   );
 }
 
-/** One topic, its books face-out, like the table at the front of a bookshop. */
-export function TopicPage({ topic: t, books, tools, onOpen }: { topic: Topic; books: Book[]; tools?: React.ReactNode; onOpen: (b: Book, el: HTMLElement) => void }) {
+/** One topic, its books face-out, like the table at the front of a bookshop, and under them its links. */
+export function TopicPage({
+  topic: t,
+  books,
+  tools,
+  links,
+  linkCount = 0,
+  onOpen,
+}: {
+  topic: Topic;
+  books: Book[];
+  tools?: React.ReactNode;
+  links?: React.ReactNode;
+  /** How many of the topic's links are shown under its books. */
+  linkCount?: number;
+  onOpen: (b: Book, el: HTMLElement) => void;
+}) {
   return (
     <div style={{ ["--c" as string]: t.shades[0] }}>
       <header className="topic-head">
@@ -73,8 +96,13 @@ export function TopicPage({ topic: t, books, tools, onOpen }: { topic: Topic; bo
           </ViewTransition>
           <p className="mt-4 text-pretty font-serif text-[18px] leading-[1.5] text-ink-2">{t.blurb}</p>
           <p className="mt-3 text-[13px] text-ink-3">
-            {books.length} {books.length === 1 ? "piece" : "pieces"} · {hours(books)} of reading
+            {(books.length > 0 || !linkCount) && (
+              <>
+                {books.length} {books.length === 1 ? "piece" : "pieces"} · {hours(books)} of reading
+              </>
+            )}
             {books.some((b) => b.pct > 0 && b.pct < 1) && ` · ${books.filter((b) => b.pct > 0 && b.pct < 1).length} in progress`}
+            {linkCount > 0 && `${books.length ? " · " : ""}${linkCount} ${linkCount === 1 ? "link" : "links"}`}
           </p>
         </div>
       </header>
@@ -104,8 +132,9 @@ export function TopicPage({ topic: t, books, tools, onOpen }: { topic: Topic; bo
             </p>
           </li>
         ))}
-        {!books.length && <li className="col-span-full py-16 text-center text-[14px] text-ink-3">Nothing here matches.</li>}
+        {!books.length && !linkCount && <li className="col-span-full py-16 text-center text-[14px] text-ink-3">Nothing here matches.</li>}
       </ul>
+      {links}
     </div>
   );
 }

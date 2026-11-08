@@ -6,10 +6,12 @@ import { ArrowRight, Check } from "lucide-react";
 import { tidyTitle } from "@/lib/article";
 import { useLibraryPrefs } from "@/lib/library-prefs";
 import { SAMPLE_SHELF } from "@/lib/classics";
+import { isLink } from "@/lib/links";
 import { SAMPLES } from "@/lib/samples";
 import { useStore } from "@/lib/store";
 
-export type Saved = { id: string; title: string };
+/** `link`: kept as a card in the library's Links drawer rather than shelved as a text. */
+export type Saved = { id: string; title: string; link?: boolean };
 
 /** How far along, as a small ring in the pen's colour. */
 function Ring({ pct }: { pct: number }) {
@@ -30,7 +32,9 @@ function Ring({ pct }: { pct: number }) {
  */
 export function LibraryLine({ saved }: { saved: Saved | null }) {
   const hydrated = useStore((s) => s.hydrated);
-  const library = useStore((s) => s.library);
+  const all = useStore((s) => s.library);
+  // Texts only: cards in the Links drawer are never read, so they are no part of this line.
+  const library = useMemo(() => all.filter((x) => !isLink(x)), [all]);
   const progress = useStore((s) => s.progress);
   const { hiddenSamples } = useLibraryPrefs();
 
@@ -51,7 +55,8 @@ export function LibraryLine({ saved }: { saved: Saved | null }) {
         <span className="lib-line-note">
           <Check size={14} className="shrink-0 text-good" />
           <span className="min-w-0 truncate">
-            Saved <span className="text-ink">{tidyTitle(saved.title)}</span> to your library
+            {saved.link ? "Kept " : "Saved "}
+            <span className="text-ink">{tidyTitle(saved.title)}</span> {saved.link ? "in your links" : "to your library"}
           </span>
         </span>
         <Link href="/library" className="lib-line-go">

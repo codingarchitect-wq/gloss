@@ -9,7 +9,8 @@ import { cleanTags, TOPICS, topicOf, type Shelving } from "./library";
 import { EXCERPT_CHARS } from "./excerpt";
 import { completeJSON, DEFAULT_MODEL } from "./llm";
 
-export type ShelveInput = { title: string; author?: string; source?: string; dek?: string; excerpt?: string };
+/** `link`: a link kept for reference (a repo, a tool, a site) rather than a text to read. */
+export type ShelveInput = { title: string; author?: string; source?: string; dek?: string; excerpt?: string; link?: boolean };
 
 const SYSTEM = `You shelve texts in a reader's personal library.
 
@@ -29,6 +30,7 @@ export async function classify(
   opts: { apiKey?: string; signal?: AbortSignal } = {}
 ): Promise<{ ok: true; shelving: Shelving; usd: number } | { ok: false; error: string }> {
   const lines = [
+    input.link && "Kind: a link kept for reference (a code repository, package, model, tool, product or site), not an article. Shelve it by what it is for.",
     `Title: ${input.title}`,
     input.author && `Author: ${input.author}`,
     input.source && `Source: ${input.source}`,

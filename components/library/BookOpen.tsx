@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, ArrowUpRight, ChevronDown, PencilLine, Star, Trash2 } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronDown, Link2, PencilLine, Star, Trash2 } from "lucide-react";
 import { fmtMinutes, hash, hostOf, lookOf, tagsOf, TOPIC, TOPICS, type Book, type TopicKey } from "@/lib/library";
 import { Cover, Glyph, Spine } from "./Book";
 
@@ -65,6 +65,7 @@ export function BookOpen({
   onRead,
   onShelve,
   onRemove,
+  onKeepAsLink,
 }: {
   book: Book;
   origin: Origin;
@@ -73,6 +74,8 @@ export function BookOpen({
   onRead: (b: Book) => void;
   onShelve: (b: Book, patch: { topic?: TopicKey; favorite?: boolean; title?: string }) => void;
   onRemove: (b: Book) => void;
+  /** Move it to the Links drawer as a card: for a page that was never for reading. */
+  onKeepAsLink?: (b: Book) => void;
 }) {
   const [g] = useState(() => measure(book));
   const [phase, setPhase] = useState<"in" | "open" | "out" | "leaving">("in");
@@ -225,6 +228,12 @@ export function BookOpen({
                     {!book.sample && (
                       <button type="button" className="ob-icon" aria-label="Rename" data-tip="Rename" onClick={() => setRenaming(true)}>
                         <PencilLine size={14} />
+                      </button>
+                    )}
+                    {/* Only before any reading: the text and its marks don't go with it into the drawer. */}
+                    {onKeepAsLink && !book.sample && book.url && book.pct === 0 && book.highlights === 0 && (
+                      <button type="button" className="ob-icon" aria-label="Keep as a link instead" data-tip="Keep as a link instead" onClick={() => onKeepAsLink(book)}>
+                        <Link2 size={14} />
                       </button>
                     )}
                     <button

@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import type { Action } from "./actions";
 import type { Article, BriefData } from "./article";
+import type { LinkMeta } from "./links";
 import { modelOf, type ModelKey, type Source, type Usage } from "./models";
 import { DEFAULT_SETTINGS, SETTINGS_KEY, type Marker, type Settings } from "./settings";
 
@@ -84,6 +85,14 @@ export type LibraryItem = {
   addedBy?: "agent";
   /** Which connection an agent saved it through, by the name the reader gave it. */
   addedVia?: string;
+  /* A link kept as a card in the Links drawer rather than read as a text (lib/links.ts). It has no text: `words` is 0. */
+  kind?: "link";
+  /** A link's site icon. */
+  icon?: string;
+  /** The reader's own line about a link: why they kept it. */
+  note?: string;
+  /** What a link's site says about it: a repo's stars and language. */
+  meta?: LinkMeta;
 };
 
 export type Progress = { block: string; pct: number; at: number };
@@ -140,6 +149,8 @@ type State = Persisted &
     setBrief: (articleId: string, b: BriefState | null) => void;
     setProgress: (articleId: string, p: Progress) => void;
     addToLibrary: (a: Article, words: number, extra?: Partial<LibraryItem>) => void;
+    /** Put a link's card in the Links drawer (lib/keep-link.ts makes it). */
+    addLink: (item: LibraryItem) => void;
     /** Change a shelf entry's library fields: its topic, tags, cover, favourite. */
     shelve: (id: string, patch: Partial<LibraryItem>) => void;
     removeFromLibrary: (id: string) => void;
@@ -293,6 +304,8 @@ export const useStore = create<State>((set, get) => ({
       for (const k of Object.keys(item) as (keyof LibraryItem)[]) if (item[k] === undefined) delete item[k];
       return { library: [item, ...st.library.filter((x) => x.id !== a.id)] };
     }),
+
+  addLink: (item) => set((st) => ({ library: [item, ...st.library.filter((x) => x.id !== item.id)] })),
 
   shelve: (id, patch) => set((st) => ({ library: st.library.map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
 

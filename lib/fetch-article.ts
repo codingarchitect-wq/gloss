@@ -25,7 +25,7 @@ const MIN_WORDS = 80;
 const NOT_REACHABLE = "That address is not reachable from here.";
 
 /** The link, if it is http(s) and every address it resolves to is public. A friendly early answer; publicFetch enforces it. */
-async function safeUrl(raw: string): Promise<URL | string> {
+export async function safeUrl(raw: string): Promise<URL | string> {
   let url: URL;
   try {
     url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
@@ -133,7 +133,38 @@ export function arxivFullText(url: string, as: "pdf" | "html"): string | null {
 export type FetchResult =
   | { ok: true; article: Article }
   | { ok: true; pdf: ArrayBuffer; name: string }
-  | { ok: false; error: string; status: number };
+  /** `notArticle`: the page was read and holds no article, so it may be better kept as a link (lib/links.ts). */
+  | { ok: false; error: string; status: number; notArticle?: boolean };
+
+/**
+ * A public page, fetched with redirects followed by hand, so every hop gets
+ * the same private-address check. The response's status is the caller's to judge.
+ */
+export async function fetchPublic(start: URL, accept: string, timeoutMs = 15_000): Promise<{ ok: true; res: PublicResponse; url: URL } | { ok: false; error: string; status: number }> {
+  let res: PublicResponse | null = null;
+  let target = start;
+  try {
+    for (let hop = 0; hop < 5; hop++) {
+      res = await publicFetch(target, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: { "User-Agent": `Mozilla/5.0 (compatible; ${APP_UA}; +reader)`, Accept: accept },
+      });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) break;
+      // The redirect's own body is never read; let its connection go.
+      await res.body?.cancel().catch(() => {});
+      const next = await safeUrl(new URL(location, target).toString());
+      if (typeof next === "string") return { ok: false, error: next, status: 400 };
+      target = next;
+    }
+  } catch (e) {
+    if (wasRefused(e)) return { ok: false, error: NOT_REACHABLE, status: 400 };
+    return { ok: false, error: "The site did not answer in time.", status: 502 };
+  }
+  if (!res) return { ok: false, error: "The site did not answer.", status: 502 };
+  return { ok: true, res, url: target };
+}
 
 /** `pdf`: the caller can read a PDF itself, so a PDF link comes back as the file instead of an error. */
 export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): Promise<FetchResult> {
@@ -152,33 +183,11 @@ export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): P
   if (kind === "social") return { ok: false, error: "That's a post, not an article. Open the link it shares, or copy the post and use Paste text.", status: 422 };
   if (kind === "video") return { ok: false, error: "That's a video, and Gloss reads text. Copy its transcript and use Paste text.", status: 422 };
 
-  // Follow redirects by hand so every hop gets the same private-address check.
-  let res: PublicResponse | null = null;
-  let target: URL = checked;
-  try {
-    for (let hop = 0; hop < 5; hop++) {
-      res = await publicFetch(target, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(15_000),
-        headers: {
-          "User-Agent": `Mozilla/5.0 (compatible; ${APP_UA}; +reader)`,
-          Accept: opts.pdf ? "text/html,application/xhtml+xml,application/pdf" : "text/html,application/xhtml+xml",
-        },
-      });
-      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-      if (!location) break;
-      // The redirect's own body is never read; let its connection go.
-      await res.body?.cancel().catch(() => {});
-      const next = await safeUrl(new URL(location, target).toString());
-      if (typeof next === "string") return { ok: false, error: next, status: 400 };
-      target = next;
-    }
-  } catch (e) {
-    if (wasRefused(e)) return { ok: false, error: NOT_REACHABLE, status: 400 };
-    return { ok: false, error: "The site did not answer in time.", status: 502 };
-  }
-  if (!res || !res.ok) {
-    const status = res?.status ?? 0;
+  const got = await fetchPublic(checked, opts.pdf ? "text/html,application/xhtml+xml,application/pdf" : "text/html,application/xhtml+xml");
+  if (!got.ok) return got;
+  const { res, url: target } = got;
+  if (!res.ok) {
+    const status = res.status;
     const msg =
       status === 401 || status === 403 || status === 429
         ? "That site does not let readers like this one in. Copy the text and use Paste text instead."
@@ -198,7 +207,7 @@ export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): P
   if (type.includes("application/pdf")) {
     return { ok: false, error: "That link is a PDF. Download it, then drop the file here.", status: 415 };
   }
-  if (!type.includes("html")) return { ok: false, error: "That link is not a web page.", status: 415 };
+  if (!type.includes("html")) return { ok: false, error: "That link is not a web page.", status: 415, notArticle: true };
 
   const buf = await res.arrayBuffer();
   if (buf.byteLength > MAX_BYTES) return { ok: false, error: "That page is too large to import.", status: 413 };
@@ -252,7 +261,7 @@ export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): P
     // Some unusual markup trips Readability up; that reads the same as no article found.
   }
   if (!parsed?.content) {
-    return { ok: false, error: "Could not find an article on that page. Try pasting the text instead.", status: 422 };
+    return { ok: false, error: "Could not find an article on that page. Try pasting the text instead.", status: 422, notArticle: true };
   }
 
   const { document: clean } = parseHTML(`<!doctype html><html><body><div id="r">${parsed.content}</div></body></html>`);
@@ -277,7 +286,7 @@ export async function fetchArticle(raw: string, opts: { pdf?: boolean } = {}): P
   // A page drawn by scripts (a Google Doc, an app shell) leaves only its newsletter box and footer.
   const words = blocks.reduce((n, b) => n + b.runs.map((r) => r.text).join("").split(/\s+/).filter(Boolean).length, 0);
   if (blocks.filter((b) => b.type === "p").length < 2 || words < MIN_WORDS) {
-    return { ok: false, error: "That page has too little text to read here.", status: 422 };
+    return { ok: false, error: "That page has too little text to read here.", status: 422, notArticle: true };
   }
 
   const article: Article = {
